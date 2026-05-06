@@ -27,16 +27,35 @@ function hexToRgb(hex: string) {
 
 function getFallbackFontName(field: CertificateField) {
   const isBold = field.fontWeight === "semibold" || field.fontWeight === "bold";
+  const isItalic = field.fontStyle === "italic";
   const fontMap: Record<string, StandardFonts> = {
-    Helvetica: isBold ? StandardFonts.HelveticaBold : StandardFonts.Helvetica,
-    Arial: isBold ? StandardFonts.HelveticaBold : StandardFonts.Helvetica,
-    Verdana: isBold ? StandardFonts.HelveticaBold : StandardFonts.Helvetica,
-    Trebuchet: isBold ? StandardFonts.HelveticaBold : StandardFonts.Helvetica,
-    TimesRoman: isBold ? StandardFonts.TimesRomanBold : StandardFonts.TimesRoman,
-    Georgia: isBold ? StandardFonts.TimesRomanBold : StandardFonts.TimesRoman,
-    Garamond: isBold ? StandardFonts.TimesRomanBold : StandardFonts.TimesRoman,
-    Courier: isBold ? StandardFonts.CourierBold : StandardFonts.Courier,
-    Monaco: isBold ? StandardFonts.CourierBold : StandardFonts.Courier,
+    Helvetica: isBold 
+      ? (isItalic ? StandardFonts.HelveticaBoldOblique : StandardFonts.HelveticaBold)
+      : (isItalic ? StandardFonts.HelveticaOblique : StandardFonts.Helvetica),
+    Arial: isBold 
+      ? (isItalic ? StandardFonts.HelveticaBoldOblique : StandardFonts.HelveticaBold)
+      : (isItalic ? StandardFonts.HelveticaOblique : StandardFonts.Helvetica),
+    Verdana: isBold 
+      ? (isItalic ? StandardFonts.HelveticaBoldOblique : StandardFonts.HelveticaBold)
+      : (isItalic ? StandardFonts.HelveticaOblique : StandardFonts.Helvetica),
+    Trebuchet: isBold 
+      ? (isItalic ? StandardFonts.HelveticaBoldOblique : StandardFonts.HelveticaBold)
+      : (isItalic ? StandardFonts.HelveticaOblique : StandardFonts.Helvetica),
+    TimesRoman: isBold 
+      ? (isItalic ? StandardFonts.TimesRomanBoldItalic : StandardFonts.TimesRomanBold)
+      : (isItalic ? StandardFonts.TimesRomanItalic : StandardFonts.TimesRoman),
+    Georgia: isBold 
+      ? (isItalic ? StandardFonts.TimesRomanBoldItalic : StandardFonts.TimesRomanBold)
+      : (isItalic ? StandardFonts.TimesRomanItalic : StandardFonts.TimesRoman),
+    Garamond: isBold 
+      ? (isItalic ? StandardFonts.TimesRomanBoldItalic : StandardFonts.TimesRomanBold)
+      : (isItalic ? StandardFonts.TimesRomanItalic : StandardFonts.TimesRoman),
+    Courier: isBold 
+      ? (isItalic ? StandardFonts.CourierBoldOblique : StandardFonts.CourierBold)
+      : (isItalic ? StandardFonts.CourierOblique : StandardFonts.Courier),
+    Monaco: isBold 
+      ? (isItalic ? StandardFonts.CourierBoldOblique : StandardFonts.CourierBold)
+      : (isItalic ? StandardFonts.CourierOblique : StandardFonts.Courier),
   };
 
   return fontMap[field.fontFamily] ?? fontMap.Helvetica;
@@ -57,13 +76,14 @@ function buildGoogleFontsCssUrl(field: CertificateField) {
   const params = new URLSearchParams({
     family: field.fontFamily,
     weight: String(getGoogleFontWeight(field)),
+    italic: field.fontStyle === "italic" ? "true" : "false",
   });
 
   return `/api/font?${params.toString()}`;
 }
 
 async function fetchGoogleFontBytes(field: CertificateField) {
-  const cacheKey = `${field.fontFamily}:${field.fontWeight}`;
+  const cacheKey = `${field.fontFamily}:${field.fontWeight}:${field.fontStyle || "normal"}`;
   const cached = googleFontCache.get(cacheKey);
 
   if (cached) {
@@ -93,8 +113,9 @@ async function getFont(pdfDoc: PDFDocument, field: CertificateField) {
   }
 }
 
-function getAlignedX(line: string, field: CertificateField, font: PDFFont) {
-  const textWidth = font.widthOfTextAtSize(line, field.fontSize);
+function getAlignedX(line: string, field: CertificateField, font: PDFFont, fontSize?: number) {
+  const size = fontSize ?? field.fontSize;
+  const textWidth = font.widthOfTextAtSize(line, size) + (line.length - 1) * (field.letterSpacing ?? 0);
 
   if (field.alignment === "center") {
     return field.x + (field.width - textWidth) / 2;
@@ -151,7 +172,52 @@ export async function generateCertificatePdf(
         y: field.y,
         width: field.width,
         height: field.height,
+        opacity: field.opacity ?? 1,
+        rotate: degrees(field.rotate ?? 0),
       });
+      continue;
+    }
+
+    if (field.type === "shape") {
+      const opacity = field.opacity ?? 1;
+      const rotate = degrees(field.rotate ?? 0);
+      const color = field.fillColor ? hexToRgb(field.fillColor) : undefined;
+      const borderColor = field.strokeColor ? hexToRgb(field.strokeColor) : undefined;
+      const borderWidth = field.strokeWidth ?? 0;
+
+      if (field.shapeType === "rectangle") {
+        page.drawRectangle({
+          x: field.x,
+          y: field.y,
+          width: field.width,
+          height: field.height,
+          color,
+          borderColor,
+          borderWidth,
+          opacity,
+          rotate,
+        });
+      } else if (field.shapeType === "circle") {
+        page.drawEllipse({
+          x: field.x + field.width / 2,
+          y: field.y + field.height / 2,
+          xScale: field.width / 2,
+          yScale: field.height / 2,
+          color,
+          borderColor,
+          borderWidth,
+          opacity,
+          rotate,
+        });
+      } else if (field.shapeType === "line") {
+        page.drawLine({
+          start: { x: field.x, y: field.y },
+          end: { x: field.x + field.width, y: field.y },
+          color: borderColor || hexToRgb("#000000"),
+          thickness: borderWidth || 1,
+          opacity,
+        });
+      }
       continue;
     }
 
@@ -160,25 +226,86 @@ export async function generateCertificatePdf(
     }
 
     const font = await getFont(pdfDoc, field);
-    const lines = field.value.split("\n");
-    const lineHeight = field.fontSize * 1.25;
+    let textValue = field.value;
+    if (field.textTransform === "uppercase") {
+      textValue = textValue.toUpperCase();
+    } else if (field.textTransform === "lowercase") {
+      textValue = textValue.toLowerCase();
+    } else if (field.textTransform === "capitalize") {
+      textValue = textValue.replace(/\b\w/g, (l) => l.toUpperCase());
+    }
+
+    const lines = textValue.split("\n");
+    
+    let fontSize = field.fontSize;
+    if (field.autoResize && field.width > 0) {
+      const minSize = field.minFontSize ?? 8;
+      const getLongestLineWidth = (size: number) => {
+        return Math.max(...lines.map(line => font.widthOfTextAtSize(line, size) + (line.length - 1) * (field.letterSpacing ?? 0)));
+      };
+      
+      let maxWidth = getLongestLineWidth(fontSize);
+      while (maxWidth > field.width && fontSize > minSize) {
+        fontSize -= 0.5;
+        maxWidth = getLongestLineWidth(fontSize);
+      }
+    }
+
+    const lineHeight = fontSize * (field.lineHeight ?? 1.25);
 
     lines.forEach((line, index) => {
       if (!line.trim()) {
         return;
       }
 
-      const x = getAlignedX(line, field, font);
+      const x = getAlignedX(line, field, font, fontSize); // Pass fontSize to getAlignedX
       const y = field.y - index * lineHeight;
+
+      // Draw Shadow if exists
+      if (field.shadowColor) {
+        page.drawText(line, {
+          x: x + (field.shadowOffsetX ?? 2),
+          y: y - (field.shadowOffsetY ?? 2),
+          size: fontSize,
+          font,
+          color: hexToRgb(field.shadowColor),
+          opacity: field.shadowOpacity ?? 0.5,
+          rotate: degrees(field.rotate ?? 0),
+          characterSpacing: field.letterSpacing ?? 0,
+        });
+      }
 
       page.drawText(line, {
         x,
         y,
-        size: field.fontSize,
+        size: fontSize,
         font,
         color: hexToRgb(field.color),
-        rotate: degrees(0),
+        opacity: field.opacity ?? 1,
+        rotate: degrees(field.rotate ?? 0),
+        characterSpacing: field.letterSpacing ?? 0,
       });
+
+      // Draw Decorations (Underline/Strikethrough)
+      if (field.textDecoration && field.textDecoration !== "none") {
+        const textWidth = font.widthOfTextAtSize(line, fontSize) + (line.length - 1) * (field.letterSpacing ?? 0);
+        const thickness = fontSize / 15;
+        let lineY = y;
+        
+        if (field.textDecoration === "underline") {
+          lineY = y - thickness * 2;
+        } else if (field.textDecoration === "line-through") {
+          lineY = y + fontSize / 3.5;
+        }
+
+        page.drawLine({
+          start: { x, y: lineY },
+          end: { x: x + textWidth, y: lineY },
+          thickness,
+          color: hexToRgb(field.color),
+          opacity: field.opacity ?? 1,
+        });
+      }
     });
   }
 

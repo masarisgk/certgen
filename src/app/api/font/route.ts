@@ -14,6 +14,7 @@ export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const family = searchParams.get("family");
   const weight = searchParams.get("weight") ?? "400";
+  const italic = searchParams.get("italic") === "true" ? "1" : "0";
 
   if (!family) {
     return NextResponse.json({ error: "Missing font family" }, { status: 400 });
@@ -21,7 +22,9 @@ export async function GET(request: NextRequest) {
 
   try {
     const familyQuery = family.trim().replace(/\s+/g, "+");
-    const cssUrl = `https://fonts.googleapis.com/css2?family=${familyQuery}:wght@${weight}&display=swap`;
+    const cssUrl = italic === "1"
+      ? `https://fonts.googleapis.com/css2?family=${familyQuery}:ital,wght@1,${weight}&display=swap`
+      : `https://fonts.googleapis.com/css2?family=${familyQuery}:wght@${weight}&display=swap`;
     const cssResponse = await fetch(cssUrl, {
       cache: "no-store",
       headers: {

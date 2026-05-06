@@ -31,7 +31,19 @@ import {
   AlignLeft,
   AlignCenter,
   AlignRight,
-  FileText
+  FileText,
+  Type,
+  Undo,
+  Redo,
+  Shapes,
+  Bold,
+  Italic,
+  Underline,
+  Strikethrough,
+  Square,
+  Circle,
+  RotateCw,
+  Layers
 } from "lucide-react";
 import Papa from "papaparse";
 
@@ -203,13 +215,42 @@ const defaultField: Omit<CertificateField, "id" | "label"> = {
   color: "#111111",
   alignment: "center",
   visible: true,
+  opacity: 1,
+  rotate: 0,
+  letterSpacing: 0,
+  lineHeight: 1.25,
+  textTransform: "none",
+  shadowColor: "",
+  shadowOffsetX: 2,
+  shadowOffsetY: 2,
+  shadowOpacity: 0.5,
+  fillColor: "#e2e8f0",
+  strokeColor: "#64748b",
+  strokeWidth: 1,
+  borderRadius: 0,
 };
 
 function createField(index: number): CertificateField {
   return {
     ...defaultField,
     id: crypto.randomUUID(),
-    label: `Field ${index}`,
+    label: `Text ${index}`,
+  };
+}
+
+function createShapeField(index: number, shapeType: "rectangle" | "circle" | "line"): CertificateField {
+  const label = shapeType.charAt(0).toUpperCase() + shapeType.slice(1);
+  return {
+    ...defaultField,
+    type: "shape",
+    id: crypto.randomUUID(),
+    label: `${label} ${index}`,
+    shapeType,
+    width: shapeType === "line" ? 200 : 100,
+    height: shapeType === "line" ? 2 : 100,
+    fillColor: shapeType === "line" ? "" : "#e2e8f0",
+    strokeColor: "#64748b",
+    strokeWidth: shapeType === "line" ? 2 : 1,
   };
 }
 
@@ -326,8 +367,12 @@ async function clearTemplateFromDB() {
 type BulkRow = Record<string, string>;
 
 export function CertificateEditor() {
-  const [fileName, setFileName] = useState("");
-  const [templateBytes, setTemplateBytes] = useState<ArrayBuffer | null>(null);
+  const [fileName, setFileName] = useState<string>("");
+  const [templateBytes, setTemplateBytes] = useState<Uint8Array | null>(null);
+
+  // History State
+  const [past, setPast] = useState<CertificateField[][]>([]);
+  const [future, setFuture] = useState<CertificateField[][]>([]);
   const [pageSize, setPageSize] = useState<PdfPageSize | null>(null);
   const [previewSize, setPreviewSize] = useState<PdfPageSize | null>(null);
   const [fields, setFields] = useState<CertificateField[]>([createField(1)]);
@@ -379,7 +424,7 @@ export function CertificateEditor() {
         const savedPdf = await loadTemplateFromDB();
         if (savedPdf) {
           setFileName(savedPdf.fileName);
-          setTemplateBytes(savedPdf.bytes);
+          setTemplateBytes(new Uint8Array(savedPdf.bytes));
         }
       } catch (error) {
         console.error("Failed to load state:", error);
@@ -463,51 +508,101 @@ export function CertificateEditor() {
     };
   }, [templateBytes, canvasZoom, isLoaded, isTooSmall]);
 
-  function updateField(id: string, patch: Partial<CertificateField>) {
-    setFields((current) =>
-      current.map((field) => (field.id === id ? { ...field, ...patch } : field)),
-    );
+  function saveHistory(newFields: CertificateField[]) {
+    setPast((prev) => {
+      const next = [fields, ...prev];
+      return next.slice(0, 50); // Limit to 50 steps
+    });
+    setFuture([]);
   }
 
+  function undo() {
+    if (past.length === 0) return;
+    const previous = past[0];
+    const newPast = past.slice(1);
+    setFuture((prev) => [fields, ...prev]);
+    setPast(newPast);
+    setFields(previous);
+  }
+
+  function redo() {
+    if (future.length === 0) return;
+    const next = future[0];
+    const newFuture = future.slice(1);
+    setPast((prev) => [fields, ...prev]);
+    setFuture(newFuture);
+    setFields(next);
+  }
+
+  // Keyboard Shortcuts
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      const isZ = event.key.toLowerCase() === "z";
+      const isY = event.key.toLowerCase() === "y";
+      const isCmd = event.metaKey || event.ctrlKey;
+      const isShift = event.shiftKey;
+
+      if (isCmd && isZ) {
+        event.preventDefault();
+        if (isShift) {
+          redo();
+        } else {
+          undo();
+        }
+      } else if (isCmd && isY) {
+        event.preventDefault();
+        redo();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [past, future, fields]);
+
   function addField() {
+    saveHistory(fields);
     const next = createField(fields.length + 1);
     setFields((current) => [next, ...current]);
     setSelectedFieldId(next.id);
   }
 
   function addImageField() {
+    saveHistory(fields);
     const next = createImageField(fields.length + 1);
     setFields((current) => [next, ...current]);
     setSelectedFieldId(next.id);
   }
 
+  function addShapeField(shapeType: "rectangle" | "circle" | "line") {
+    saveHistory(fields);
+    const next = createShapeField(fields.length + 1, shapeType);
+    setFields((current) => [next, ...current]);
+    setSelectedFieldId(next.id);
+  }
+
   function removeField(id: string) {
+    saveHistory(fields);
     setFields((current) => {
       const next = current.filter((field) => field.id !== id);
-      if (selectedFieldId === id) {
-        setSelectedFieldId(next[0]?.id ?? "");
-      }
       return next;
     });
+    setSelectedFieldId("");
   }
 
   function duplicateField(id: string) {
-    const source = fields.find((field) => field.id === id);
-
-    if (!source) {
-      return;
+    saveHistory(fields);
+    const field = fields.find((f) => f.id === id);
+    if (field) {
+      const next = { ...field, id: crypto.randomUUID(), label: `${field.label} (Copy)`, x: field.x + 20, y: field.y - 20 };
+      setFields((current) => [next, ...current]);
+      setSelectedFieldId(next.id);
     }
+  }
 
-    const next: CertificateField = {
-      ...source,
-      id: crypto.randomUUID(),
-      label: `${source.label} Copy`,
-      x: source.x + 20,
-      y: Math.max(0, source.y - 20),
-    };
-
-    setFields((current) => [next, ...current]);
-    setSelectedFieldId(next.id);
+  function updateField(id: string, patch: Partial<CertificateField>) {
+    setFields((current) =>
+      current.map((field) => (field.id === id ? { ...field, ...patch } : field)),
+    );
   }
 
   async function handleFile(file: File | null) {
@@ -966,7 +1061,45 @@ export function CertificateEditor() {
             onDrop={handleDrop}
           >
             {templateBytes ? (
-              <div className="absolute right-4 top-4 z-20 flex items-center gap-1 rounded-md border bg-background/80 backdrop-blur-md px-1 py-0.5 text-[10px] font-medium shadow-sm transition-colors duration-300">
+              <div className="absolute right-4 top-4 z-20 flex items-center gap-1.5 rounded-md border bg-background/80 backdrop-blur-md px-1 py-0.5 text-[10px] font-medium shadow-sm transition-colors duration-300">
+                <div className="flex items-center gap-0.5 border-r pr-1.5 mr-0.5">
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="h-6 w-6"
+                          disabled={past.length === 0}
+                          onClick={undo}
+                        >
+                          <Undo className="size-3 text-muted-foreground" />
+                        </Button>
+                      }
+                    />
+                    <TooltipContent side="bottom">Undo (Cmd+Z)</TooltipContent>
+                  </Tooltip>
+
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="h-6 w-6"
+                          disabled={future.length === 0}
+                          onClick={redo}
+                        >
+                          <Redo className="size-3 text-muted-foreground" />
+                        </Button>
+                      }
+                    />
+                    <TooltipContent side="bottom">Redo (Cmd+Shift+Z)</TooltipContent>
+                  </Tooltip>
+                </div>
+
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -977,11 +1110,11 @@ export function CertificateEditor() {
                         className="h-6 w-6"
                         aria-label="Zoom out"
                         onClick={() => zoomCanvas(-0.1)}
-                      />
+                      >
+                        <Minus className="size-3 text-muted-foreground" />
+                      </Button>
                     }
-                  >
-                    <Minus className="size-3 text-muted-foreground" />
-                  </TooltipTrigger>
+                  />
                   <TooltipContent side="bottom">Zoom out</TooltipContent>
                 </Tooltip>
 
@@ -997,11 +1130,11 @@ export function CertificateEditor() {
                         className="h-6 w-6"
                         aria-label="Zoom in"
                         onClick={() => zoomCanvas(0.1)}
-                      />
+                      >
+                        <Plus className="size-3 text-muted-foreground" />
+                      </Button>
                     }
-                  >
-                    <Plus className="size-3 text-muted-foreground" />
-                  </TooltipTrigger>
+                  />
                   <TooltipContent side="bottom">Zoom in</TooltipContent>
                 </Tooltip>
               </div>
@@ -1086,6 +1219,7 @@ export function CertificateEditor() {
                         <PreviewField
                           key={field.id}
                           field={field}
+                          fields={fields}
                           pageSize={pageSize}
                           previewSize={previewSize}
                           canvasZoom={canvasZoom}
@@ -1094,12 +1228,17 @@ export function CertificateEditor() {
                           editing={field.id === editingFieldId}
                           onSelect={() => setSelectedFieldId(field.id)}
                           onEditStart={() => {
+                            saveHistory(fields);
                             setSelectedFieldId(field.id);
                             setEditingFieldId(field.id);
                           }}
                           onEditEnd={() => setEditingFieldId(null)}
-                          onDragStart={() => setDraggingFieldId(field.id)}
+                          onDragStart={() => {
+                            saveHistory(fields);
+                            setDraggingFieldId(field.id);
+                          }}
                           onDragEnd={() => setDraggingFieldId(null)}
+                          onResizeStart={() => saveHistory(fields)}
                           onMove={(x, y) => updateField(field.id, { x, y })}
                           onValueChange={(value) => updateField(field.id, { value })}
                           onResize={(width, height) =>
@@ -1124,6 +1263,7 @@ export function CertificateEditor() {
               filenameTemplate={filenameTemplate}
               onAddField={addField}
               onAddImageField={addImageField}
+              onAddShapeField={addShapeField}
               onRemoveField={removeField}
               onDuplicateField={duplicateField}
               onSelectField={setSelectedFieldId}
@@ -1174,6 +1314,7 @@ function SidebarEditor({
   filenameTemplate,
   onAddField,
   onAddImageField,
+  onAddShapeField,
   onRemoveField,
   onDuplicateField,
   onSelectField,
@@ -1193,6 +1334,7 @@ function SidebarEditor({
   filenameTemplate: string;
   onAddField: () => void;
   onAddImageField: () => void;
+  onAddShapeField: (shapeType: "rectangle" | "circle" | "line") => void;
   onRemoveField: (id: string) => void;
   onDuplicateField: (id: string) => void;
   onSelectField: (id: string) => void;
@@ -1223,6 +1365,11 @@ function SidebarEditor({
 
   function handleAddImageField() {
     onAddImageField();
+    setActiveSidebarTab("fields");
+  }
+
+  function handleAddShapeField(shapeType: "rectangle" | "circle" | "line") {
+    onAddShapeField(shapeType);
     setActiveSidebarTab("fields");
   }
 
@@ -1263,6 +1410,32 @@ function SidebarEditor({
                   <Plus className="mr-1.5 size-3" />
                   Text
                 </Button>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <Button size="sm" variant="outline">
+                        <Shapes className="mr-1.5 size-3" />
+                        Shape
+                      </Button>
+                    }
+                  />
+                  <DropdownMenuContent align="end" className="w-32">
+                    <DropdownMenuItem onClick={() => handleAddShapeField("rectangle")}>
+                      <Square className="mr-2 size-4 text-muted-foreground" />
+                      Rectangle
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleAddShapeField("circle")}>
+                      <Circle className="mr-2 size-4 text-muted-foreground" />
+                      Circle
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleAddShapeField("line")}>
+                      <Minus className="mr-2 size-4 text-muted-foreground" />
+                      Line
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
                 <Button size="sm" variant="outline" onClick={handleAddImageField}>
                   <ImageIcon className="mr-1.5 size-3" />
                   Image
@@ -1317,11 +1490,11 @@ function SidebarEditor({
                                 onClick={() => {
                                   onDuplicateField(field.id);
                                 }}
-                              />
+                              >
+                                <Copy className="size-4" />
+                              </Button>
                             }
-                          >
-                            <Copy className="size-4" />
-                          </TooltipTrigger>
+                          />
                           <TooltipContent side="bottom">Duplikasi field</TooltipContent>
                         </Tooltip>
 
@@ -1344,15 +1517,15 @@ function SidebarEditor({
                                   onSelectField(field.id);
                                   onUpdateField(field.id, { visible: !field.visible });
                                 }}
-                              />
+                              >
+                                {field.visible ? (
+                                  <Eye className="size-4" />
+                                ) : (
+                                  <EyeOff className="size-4" />
+                                )}
+                              </Button>
                             }
-                          >
-                            {field.visible ? (
-                              <Eye className="size-4" />
-                            ) : (
-                              <EyeOff className="size-4" />
-                            )}
-                          </TooltipTrigger>
+                          />
                           <TooltipContent side="bottom">
                             {field.visible ? "Sembunyikan field" : "Tampilkan field"}
                           </TooltipContent>
@@ -1371,11 +1544,11 @@ function SidebarEditor({
                                   onSelectField(field.id);
                                   setExpandedFieldId(expandedFieldId === field.id ? null : field.id);
                                 }}
-                              />
+                              >
+                                <Settings2 className="size-4" />
+                              </Button>
                             }
-                          >
-                            <Settings2 className="size-4" />
-                          </TooltipTrigger>
+                          />
                           <TooltipContent side="bottom">Edit styling</TooltipContent>
                         </Tooltip>
                       </div>
@@ -1473,9 +1646,11 @@ function PreviewField({
   onEditEnd,
   onDragStart,
   onDragEnd,
+  onResizeStart,
   onMove,
   onValueChange,
   onResize,
+  fields,
 }: {
   field: CertificateField;
   pageSize: PdfPageSize | null;
@@ -1489,10 +1664,13 @@ function PreviewField({
   onEditEnd: () => void;
   onDragStart: () => void;
   onDragEnd: () => void;
+  onResizeStart: () => void;
   onMove: (x: number, y: number) => void;
   onValueChange: (value: string) => void;
   onResize: (width: number, height: number) => void;
+  fields: CertificateField[];
 }) {
+  const [activeGuides, setActiveGuides] = useState<{ x?: number; y?: number }>({});
   if (!field.visible || !pageSize || !previewSize) {
     return null;
   }
@@ -1502,7 +1680,38 @@ function PreviewField({
   const top = ((pageSize.height - field.y - yOffset) / pageSize.height) * previewSize.height;
   const width = (field.width / pageSize.width) * previewSize.width;
   const height = (field.height / pageSize.height) * previewSize.height;
-  const fontSize = (field.fontSize / pageSize.height) * previewSize.height;
+
+  // Auto Resize Calculation
+  const fontSize = useMemo(() => {
+    const baseSize = (field.fontSize / pageSize.height) * previewSize.height;
+    if (!field.autoResize || field.type !== "text" || !field.width) return baseSize;
+
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    if (!context) return baseSize;
+
+    const previewFontWeightValue = previewFontWeight[field.fontWeight];
+    const previewWidth = (field.width / pageSize.width) * previewSize.width;
+    const minSize = ((field.minFontSize ?? 8) / pageSize.height) * previewSize.height;
+    
+    let currentSize = baseSize;
+    const lines = (field.value || field.label).split("\n");
+    const getLongestLineWidth = (size: number) => {
+      context.font = `${previewFontWeightValue} ${size}px ${getFontStack(field.fontFamily)}`;
+      return Math.max(...lines.map(line => {
+        const metrics = context.measureText(line);
+        return metrics.width + (line.length - 1) * ((field.letterSpacing ?? 0) / pageSize.width) * previewSize.width;
+      }));
+    };
+
+    let currentMaxWidth = getLongestLineWidth(currentSize);
+    while (currentMaxWidth > previewWidth && currentSize > minSize) {
+      currentSize -= 0.5;
+      currentMaxWidth = getLongestLineWidth(currentSize);
+    }
+
+    return currentSize;
+  }, [field.fontSize, field.autoResize, field.width, field.value, field.label, field.fontFamily, field.fontWeight, field.letterSpacing, field.minFontSize, pageSize, previewSize]);
 
   function handlePointerDown(event: React.PointerEvent<HTMLButtonElement>) {
     if (!pageSize || !previewSize) {
@@ -1542,11 +1751,69 @@ function PreviewField({
         (clampedTop / currentPreviewSize.height) * currentPageSize.height -
         yOffset;
 
-      onMove(Math.round(nextX), Math.round(nextY));
+      // Snapping Logic
+      const SNAP_THRESHOLD = 6; // px in PDF units
+      let finalX = nextX;
+      let finalY = nextY;
+      let guideX: number | undefined;
+      let guideY: number | undefined;
+
+      const myXCenter = nextX + field.width / 2;
+      const myXRight = nextX + field.width;
+      const myYCenter = nextY + yOffset / 2;
+      const myYTop = nextY + yOffset;
+
+      // Snapping candidates
+      const xTargets = [
+        { val: 0, guide: 0 },
+        { val: currentPageSize.width / 2 - field.width / 2, guide: currentPageSize.width / 2 },
+        { val: currentPageSize.width - field.width, guide: currentPageSize.width },
+      ];
+
+      const yTargets = [
+        { val: 0, guide: 0 },
+        { val: currentPageSize.height / 2 - yOffset / 2, guide: currentPageSize.height / 2 },
+        { val: currentPageSize.height - yOffset, guide: currentPageSize.height },
+      ];
+
+      // Add other fields to targets
+      fields.filter(f => f.id !== field.id && f.visible).forEach(f => {
+        const fYOffset = f.type === "image" ? f.height : f.fontSize;
+        
+        // X Snapping
+        xTargets.push({ val: f.x, guide: f.x });
+        xTargets.push({ val: f.x + f.width - field.width, guide: f.x + f.width });
+        xTargets.push({ val: f.x + f.width / 2 - field.width / 2, guide: f.x + f.width / 2 });
+        
+        // Y Snapping
+        yTargets.push({ val: f.y, guide: f.y });
+        yTargets.push({ val: f.y + fYOffset - yOffset, guide: f.y + fYOffset });
+        yTargets.push({ val: f.y + fYOffset / 2 - yOffset / 2, guide: f.y + fYOffset / 2 });
+      });
+
+      for (const target of xTargets) {
+        if (Math.abs(nextX - target.val) < SNAP_THRESHOLD) {
+          finalX = target.val;
+          guideX = target.guide;
+          break;
+        }
+      }
+
+      for (const target of yTargets) {
+        if (Math.abs(nextY - target.val) < SNAP_THRESHOLD) {
+          finalY = target.val;
+          guideY = target.guide;
+          break;
+        }
+      }
+
+      setActiveGuides({ x: guideX, y: guideY });
+      onMove(Math.round(finalX), Math.round(finalY));
     }
 
     function handlePointerUp() {
       onDragEnd();
+      setActiveGuides({});
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
       window.removeEventListener("pointercancel", handlePointerUp);
@@ -1565,6 +1832,7 @@ function PreviewField({
     event.preventDefault();
     event.stopPropagation();
     onSelect();
+    onResizeStart();
 
     const currentPageSize = pageSize;
     const currentPreviewSize = previewSize;
@@ -1622,7 +1890,14 @@ function PreviewField({
         height: field.type === "text" ? "auto" : height,
         color: field.color,
         textAlign: field.alignment,
-        lineHeight: 1.25,
+        lineHeight: field.lineHeight ?? 1.25,
+        letterSpacing: field.letterSpacing ? `${field.letterSpacing}px` : "normal",
+        opacity: field.opacity ?? 1,
+        transform: field.rotate ? `rotate(${field.rotate}deg)` : "none",
+        textTransform: field.textTransform ?? "none",
+        textShadow: field.shadowColor
+          ? `${field.shadowOffsetX ?? 2}px ${field.shadowOffsetY ?? 2}px 0px ${field.shadowColor}${Math.round((field.shadowOpacity ?? 0.5) * 255).toString(16).padStart(2, "0")}`
+          : "none",
         whiteSpace: "pre-wrap",
         wordBreak: "break-word",
       }}
@@ -1646,6 +1921,12 @@ function PreviewField({
             fontWeight: previewFontWeight[field.fontWeight],
             fontSize,
             textAlign: field.alignment,
+            lineHeight: field.lineHeight ?? 1.25,
+            letterSpacing: field.letterSpacing ? `${field.letterSpacing}px` : "normal",
+            opacity: field.opacity ?? 1,
+            textTransform: field.textTransform ?? "none",
+            fontStyle: field.fontStyle ?? "normal",
+            textDecoration: field.textDecoration ?? "none",
           }}
           onChange={(event) => onValueChange(event.target.value)}
           onBlur={onEditEnd}
@@ -1667,11 +1948,41 @@ function PreviewField({
             draggable={false}
           />
         ) : (
-          <span className="flex h-full items-center justify-center gap-1 text-xs text-muted-foreground">
-            <ImageIcon className="size-4" />
-            Upload image
-          </span>
+          <div 
+            className="flex h-full flex-col items-center justify-center gap-1 text-[10px] text-muted-foreground"
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            onDrop={async (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const file = e.dataTransfer.files[0];
+              if (file && (file.type.startsWith("image/"))) {
+                const isPng = file.type === "image/png" || file.name.toLowerCase().endsWith(".png");
+                onUpdateField(field.id, {
+                  imageDataUrl: await fileToDataUrl(file),
+                  imageMimeType: isPng ? "image/png" : "image/jpeg",
+                  value: file.name,
+                });
+              }
+            }}
+          >
+            <ImageIcon className="size-4 opacity-50" />
+            <span className="font-medium opacity-70">Drop Image Here</span>
+          </div>
         )
+      ) : field.type === "shape" ? (
+        <div
+          className="h-full w-full"
+          style={{
+            backgroundColor: field.shapeType === "line" ? "transparent" : field.fillColor,
+            border: field.strokeWidth && field.strokeColor && field.shapeType !== "line" ? `${(field.strokeWidth / pageSize.height) * previewSize.height}px solid ${field.strokeColor}` : "none",
+            borderRadius: field.shapeType === "circle" ? "50%" : `${((field.borderRadius ?? 0) / pageSize.height) * previewSize.height}px`,
+            height: field.shapeType === "line" ? `${((field.strokeWidth ?? 2) / pageSize.height) * previewSize.height}px` : "100%",
+            borderTop: field.shapeType === "line" && field.strokeColor ? `${((field.strokeWidth ?? 2) / pageSize.height) * previewSize.height}px solid ${field.strokeColor}` : undefined,
+          }}
+        />
       ) : (
         <span
           className="block"
@@ -1679,6 +1990,13 @@ function PreviewField({
             fontFamily: getFontStack(field.fontFamily),
             fontWeight: previewFontWeight[field.fontWeight],
             fontSize,
+            textAlign: field.alignment,
+            lineHeight: field.lineHeight ?? 1.25,
+            letterSpacing: field.letterSpacing ? `${field.letterSpacing}px` : "normal",
+            opacity: field.opacity ?? 1,
+            textTransform: field.textTransform ?? "none",
+            fontStyle: field.fontStyle ?? "normal",
+            textDecoration: field.textDecoration ?? "none",
           }}
         >
           {field.value || field.label}
@@ -1686,11 +2004,12 @@ function PreviewField({
       )}
       {selected ? (
         <>
-          <div className="absolute -top-7 left-0 z-50 flex h-5 items-center gap-1.5 rounded-md bg-primary px-2 py-1 text-[10px] font-bold font-sans text-primary-foreground shadow-xl ring-1 ring-white/10 transition-colors duration-300">
-            <span className="opacity-70">W</span>
-            <span>{Math.round(field.width)}</span>
-            <span className="ml-1 opacity-70">H</span>
-            <span>{Math.round(field.height)}</span>
+          <div className="absolute -top-7 left-0 z-50 flex h-6 w-max whitespace-nowrap items-center gap-2 rounded-full bg-zinc-900 px-2.5 py-1 text-[10px] font-bold font-sans text-white shadow-xl ring-1 ring-white/10 transition-all duration-300">
+            <span className="text-[9px] font-black text-zinc-500 uppercase tracking-tighter">W</span>
+            <span className="tabular-nums">{Math.round(field.width)}</span>
+            <div className="mx-0.5 h-2 w-px bg-white/20" />
+            <span className="text-[9px] font-black text-zinc-500 uppercase tracking-tighter">H</span>
+            <span className="tabular-nums">{Math.round(field.height)}</span>
           </div>
           <span
             aria-hidden="true"
@@ -1699,6 +2018,30 @@ function PreviewField({
           />
         </>
       ) : null}
+      
+      {/* Visual Guidelines */}
+      {dragging && activeGuides.x !== undefined && (
+        <div 
+          className="pointer-events-none absolute border-l border-sky-500/50 shadow-[0_0_8px_rgba(14,165,233,0.3)] z-[100]"
+          style={{
+            left: (activeGuides.x / pageSize.width) * previewSize.width - left,
+            top: -top,
+            height: previewSize.height,
+            width: 0,
+          }}
+        />
+      )}
+      {dragging && activeGuides.y !== undefined && (
+        <div 
+          className="pointer-events-none absolute border-t border-sky-500/50 shadow-[0_0_8px_rgba(14,165,233,0.3)] z-[100]"
+          style={{
+            left: -left,
+            top: ((pageSize.height - activeGuides.y) / pageSize.height) * previewSize.height - top,
+            width: previewSize.width,
+            height: 0,
+          }}
+        />
+      )}
     </button>
   );
 }
@@ -1813,6 +2156,8 @@ function ImageUploadInput({
   id: string;
   onChange: (patch: Partial<CertificateField>) => void;
 }) {
+  const [isDragOver, setIsDragOver] = useState(false);
+
   async function handleImage(file: File | null) {
     if (!file) {
       return;
@@ -1836,13 +2181,37 @@ function ImageUploadInput({
   }
 
   return (
-    <Input
-      id={id}
-      type="file"
-      accept="image/png,image/jpeg"
-      className="h-9 text-xs"
-      onChange={(event) => void handleImage(event.target.files?.[0] ?? null)}
-    />
+    <div
+      className={cn(
+        "relative flex h-24 cursor-pointer flex-col items-center justify-center gap-2 rounded-md border border-dashed text-muted-foreground transition-all",
+        isDragOver ? "border-primary bg-primary/5 text-primary" : "hover:border-primary hover:bg-muted/50"
+      )}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setIsDragOver(true);
+      }}
+      onDragLeave={() => setIsDragOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setIsDragOver(false);
+        void handleImage(e.dataTransfer.files[0]);
+      }}
+    >
+      <div className="flex flex-col items-center gap-1.5 p-4 text-center">
+        <FileUp className={cn("size-5 transition-transform", isDragOver && "scale-110")} />
+        <div className="space-y-0.5">
+          <p className="text-[10px] font-medium">Drop image here</p>
+          <p className="text-[9px] opacity-60">or click to browse (PNG, JPG)</p>
+        </div>
+      </div>
+      <input
+        id={id}
+        type="file"
+        accept="image/png,image/jpeg"
+        className="absolute inset-0 cursor-pointer opacity-0"
+        onChange={(event) => void handleImage(event.target.files?.[0] ?? null)}
+      />
+    </div>
   );
 }
 
@@ -2093,7 +2462,7 @@ function FieldSettings({
         />
       </div>
 
-      {isImageField ? (
+      {field.type === "image" ? (
         <div className="grid gap-2">
           <Label htmlFor="field-image" className="text-xs text-muted-foreground">Image</Label>
           <ImageUploadInput id="field-image" onChange={onChange} />
@@ -2107,6 +2476,86 @@ function FieldSettings({
               />
             </div>
           )}
+        </div>
+      ) : field.type === "shape" ? (
+        <div className="grid grid-cols-2 gap-4">
+          <div className="grid gap-2">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs text-muted-foreground">Fill Color</Label>
+              {field.fillColor && (
+                <button
+                  className="text-[10px] text-muted-foreground hover:text-destructive transition-colors"
+                  onClick={() => onChange({ fillColor: "" })}
+                >
+                  None
+                </button>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <div className="relative h-8 w-full overflow-hidden rounded-md border shadow-sm transition-colors hover:border-primary">
+                {field.fillColor ? (
+                  <>
+                    <Input
+                      type="color"
+                      value={field.fillColor}
+                      className="absolute inset-0 h-full w-full cursor-pointer border-none bg-transparent p-0 opacity-0"
+                      onChange={(event) => onChange({ fillColor: event.target.value })}
+                      disabled={field.shapeType === "line"}
+                    />
+                    <div
+                      className={cn("h-full w-full", field.shapeType === "line" && "bg-zinc-200 opacity-50")}
+                      style={{ backgroundColor: field.shapeType === "line" ? undefined : field.fillColor }}
+                    />
+                  </>
+                ) : (
+                  <button
+                    className="flex h-full w-full items-center justify-center bg-muted/30 text-[10px] text-muted-foreground hover:bg-muted/50 transition-all"
+                    onClick={() => onChange({ fillColor: "#ffffff" })}
+                  >
+                    Transparent
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="grid gap-2">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs text-muted-foreground">Stroke Color</Label>
+              {field.strokeColor && (
+                <button
+                  className="text-[10px] text-muted-foreground hover:text-destructive transition-colors"
+                  onClick={() => onChange({ strokeColor: "" })}
+                >
+                  None
+                </button>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <div className="relative h-8 w-full overflow-hidden rounded-md border shadow-sm transition-colors hover:border-primary">
+                {field.strokeColor ? (
+                  <>
+                    <Input
+                      type="color"
+                      value={field.strokeColor}
+                      className="absolute inset-0 h-full w-full cursor-pointer border-none bg-transparent p-0 opacity-0"
+                      onChange={(event) => onChange({ strokeColor: event.target.value })}
+                    />
+                    <div
+                      className="h-full w-full"
+                      style={{ backgroundColor: field.strokeColor }}
+                    />
+                  </>
+                ) : (
+                  <button
+                    className="flex h-full w-full items-center justify-center bg-muted/30 text-[10px] text-muted-foreground hover:bg-muted/50 transition-all"
+                    onClick={() => onChange({ strokeColor: "#000000" })}
+                  >
+                    None
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       ) : (
         <div className="grid gap-2">
@@ -2128,7 +2577,22 @@ function FieldSettings({
         <NumberInput label="H" value={field.height} onChange={(height) => onChange({ height })} />
       </div>
 
-      {!isImageField && (
+      {field.type === "shape" && (
+        <div className="grid grid-cols-2 gap-4">
+          <div className="grid gap-2">
+            <Label className="text-xs text-muted-foreground">Stroke Width</Label>
+            <NumberInput label="Px" value={field.strokeWidth ?? 1} onChange={(val) => onChange({ strokeWidth: val })} />
+          </div>
+          {field.shapeType === "rectangle" && (
+            <div className="grid gap-2">
+              <Label className="text-xs text-muted-foreground">Radius</Label>
+              <NumberInput label="Px" value={field.borderRadius ?? 0} onChange={(val) => onChange({ borderRadius: val })} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {field.type === "text" && (
         <div className="space-y-4 pt-2">
 
           <Separator className="opacity-50" />
@@ -2254,6 +2718,196 @@ function FieldSettings({
                   ))}
                 </div>
               </div>
+            </div>
+
+            <div className="grid gap-2">
+              <Label className="text-xs text-muted-foreground">Text Effects</Label>
+              <div className="flex gap-1 rounded-md bg-muted/50 p-1">
+                {[
+                  { id: "bold", icon: Bold, active: field.fontWeight === "bold", onClick: () => onChange({ fontWeight: field.fontWeight === "bold" ? "regular" : "bold" }) },
+                  { id: "italic", icon: Italic, active: field.fontStyle === "italic", onClick: () => onChange({ fontStyle: field.fontStyle === "italic" ? "normal" : "italic" }) },
+                  { id: "underline", icon: Underline, active: field.textDecoration === "underline", onClick: () => onChange({ textDecoration: field.textDecoration === "underline" ? "none" : "underline" }) },
+                  { id: "strikethrough", icon: Strikethrough, active: field.textDecoration === "line-through", onClick: () => onChange({ textDecoration: field.textDecoration === "line-through" ? "none" : "line-through" }) },
+                ].map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={cn(
+                      "flex flex-1 items-center justify-center rounded py-1.5 transition-all",
+                      item.active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                    )}
+                    onClick={item.onClick}
+                  >
+                    <item.icon className="size-3.5" />
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label className="text-xs text-muted-foreground">Auto Resize</Label>
+                  <div className="flex h-8 items-center justify-between rounded-md border bg-muted/20 px-2.5">
+                    <span className="text-[10px] font-medium text-muted-foreground">{field.autoResize ? "On" : "Off"}</span>
+                    <Switch
+                      checked={field.autoResize ?? false}
+                      onCheckedChange={(checked) => onChange({ autoResize: checked })}
+                      className="scale-75 origin-right"
+                    />
+                  </div>
+                </div>
+
+                {field.autoResize && (
+                  <div className="grid gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                    <Label className="text-xs text-muted-foreground">Min Size</Label>
+                    <NumberInput label="Px" value={field.minFontSize ?? 8} onChange={(val) => onChange({ minFontSize: val })} />
+                  </div>
+                )}
+              </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label className="text-xs text-muted-foreground">Opacity</Label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                    value={field.opacity ?? 1}
+                    className="h-4 flex-1 cursor-pointer accent-primary"
+                    onChange={(e) => onChange({ opacity: Number(e.target.value) })}
+                  />
+                  <span className="w-8 text-[10px] font-mono">{(field.opacity ?? 1).toFixed(1)}</span>
+                </div>
+              </div>
+
+              <div className="grid gap-2">
+                <Label className="text-xs text-muted-foreground">Rotation</Label>
+                <div className="group relative flex items-center gap-0 overflow-hidden rounded-md border transition-colors focus-within:border-primary">
+                  <div className="flex h-8 w-7 shrink-0 items-center justify-center border-r bg-muted text-[10px] font-bold text-muted-foreground select-none group-focus-within:text-foreground transition-colors">
+                    <RotateCw className="size-3" />
+                  </div>
+                  <input
+                    type="number"
+                    value={field.rotate ?? 0}
+                    className="h-8 w-full bg-background px-2 text-xs font-medium text-foreground outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none transition-colors"
+                    onChange={(e) => onChange({ rotate: Number(e.target.value) })}
+                  />
+                  <div className="flex h-8 w-6 shrink-0 items-center justify-center text-[10px] text-muted-foreground">°</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label className="text-xs text-muted-foreground">Letter Spacing</Label>
+                <NumberInput label="Px" value={field.letterSpacing ?? 0} onChange={(val) => onChange({ letterSpacing: val })} />
+              </div>
+              <div className="grid gap-2">
+                <Label className="text-xs text-muted-foreground">Line Height</Label>
+                <NumberInput label="Em" value={field.lineHeight ?? 1.25} onChange={(val) => onChange({ lineHeight: val })} />
+              </div>
+            </div>
+
+            <div className="grid gap-2">
+              <Label className="text-xs text-muted-foreground">Text Transform</Label>
+              <div className="grid grid-cols-4 gap-1 rounded-md bg-muted/50 p-1">
+                {[
+                  { value: "none", label: "Ab", title: "None" },
+                  { value: "uppercase", label: "AA", title: "Uppercase" },
+                  { value: "lowercase", label: "aa", title: "Lowercase" },
+                  { value: "capitalize", label: "Aa", title: "Capitalize" },
+                ].map((item) => (
+                  <Tooltip key={item.value}>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          className={cn(
+                            "flex h-7 items-center justify-center rounded px-1 transition-all",
+                            (field.textTransform ?? "none") === item.value
+                              ? "bg-background text-foreground shadow-sm font-bold"
+                              : "text-muted-foreground hover:text-foreground"
+                          )}
+                          onClick={() => onChange({ textTransform: item.value as any })}
+                        >
+                          <span className="text-[11px] font-medium">{item.label}</span>
+                        </button>
+                      }
+                    >
+                      {item.title}
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="text-[10px]">{item.title}</TooltipContent>
+                  </Tooltip>
+                ))}
+              </div>
+            </div>
+
+            <Separator className="my-2 opacity-50" />
+
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-semibold">Shadow</Label>
+                <Switch
+                  checked={!!field.shadowColor}
+                  onCheckedChange={(checked) => onChange({ shadowColor: checked ? "#000000" : "" })}
+                />
+              </div>
+
+              {field.shadowColor !== undefined && field.shadowColor !== "" && (
+                <div className="space-y-4 rounded-md border bg-muted/20 p-3 animate-in fade-in slide-in-from-top-2">
+                  <div className="grid gap-2">
+                    <Label className="text-xs text-muted-foreground">Shadow Color</Label>
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <Input
+                          value={field.shadowColor}
+                          className="h-8 pl-5 text-[11px] font-mono uppercase"
+                          onChange={(event) => onChange({ shadowColor: event.target.value })}
+                        />
+                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">#</span>
+                      </div>
+                      <div className="relative h-8 w-10 shrink-0 overflow-hidden rounded-md border">
+                        <Input
+                          type="color"
+                          value={field.shadowColor}
+                          className="absolute inset-0 h-full w-full cursor-pointer border-none bg-transparent p-0 opacity-0"
+                          onChange={(event) => onChange({ shadowColor: event.target.value })}
+                        />
+                        <div className="h-full w-full" style={{ backgroundColor: field.shadowColor }} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="grid gap-2">
+                      <Label className="text-xs text-muted-foreground">Offset X</Label>
+                      <NumberInput label="X" value={field.shadowOffsetX ?? 2} onChange={(val) => onChange({ shadowOffsetX: val })} />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label className="text-xs text-muted-foreground">Offset Y</Label>
+                      <NumberInput label="Y" value={field.shadowOffsetY ?? 2} onChange={(val) => onChange({ shadowOffsetY: val })} />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label className="text-xs text-muted-foreground">Shadow Opacity</Label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.1"
+                        value={field.shadowOpacity ?? 0.5}
+                        className="h-4 flex-1 cursor-pointer accent-primary"
+                        onChange={(e) => onChange({ shadowOpacity: Number(e.target.value) })}
+                      />
+                      <span className="w-8 text-[10px] font-mono">{(field.shadowOpacity ?? 0.5).toFixed(1)}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
           </div>
