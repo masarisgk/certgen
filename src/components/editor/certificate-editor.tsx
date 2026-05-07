@@ -468,6 +468,7 @@ export function CertificateEditor() {
   const [blankCanvasOrientation, setBlankCanvasOrientation] =
     useState<CanvasOrientation>("landscape");
   const [isTooSmall, setIsTooSmall] = useState(false);
+  const [viewportWidth, setViewportWidth] = useState(0);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const projectInputRef = useRef<HTMLInputElement>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
@@ -510,6 +511,7 @@ export function CertificateEditor() {
     }
 
     const checkSize = () => {
+      setViewportWidth(window.innerWidth);
       setIsTooSmall(window.innerWidth < 1200);
     };
 
@@ -548,10 +550,11 @@ export function CertificateEditor() {
       const pdf = await loadingTask.promise;
       const page = await pdf.getPage(1);
       const baseViewport = page.getViewport({ scale: 1 });
-      const containerWidth = Math.min(860, window.innerWidth - 520);
-      const scale =
-        Math.max(0.55, Math.min(1.35, containerWidth / baseViewport.width)) *
-        canvasZoom;
+      const containerWidth = Math.max(240, window.innerWidth - 390 - 96);
+      const containerHeight = Math.max(240, window.innerHeight - 96);
+      const widthScale = containerWidth / baseViewport.width;
+      const heightScale = containerHeight / baseViewport.height;
+      const scale = Math.min(widthScale, heightScale);
       const viewport = page.getViewport({ scale });
       const canvas = canvasRef.current;
 
@@ -584,7 +587,7 @@ export function CertificateEditor() {
     return () => {
       cancelled = true;
     };
-  }, [templateBytes, canvasZoom, isLoaded, isTooSmall]);
+  }, [templateBytes, viewportWidth, isLoaded, isTooSmall]);
 
   function saveHistory(newFields: CertificateField[]) {
     setPast((prev) => {
@@ -1211,7 +1214,7 @@ export function CertificateEditor() {
                     Toggle Theme
                   </MenubarItem>
                   <MenubarSeparator />
-                  <MenubarItem onClick={() => setCanvasZoom(1)}>
+                  <MenubarItem onClick={resetCanvasView}>
                     <RotateCcw className="size-3 text-muted-foreground" />
                     Reset Zoom
                   </MenubarItem>
