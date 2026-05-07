@@ -375,8 +375,8 @@ export function CertificateEditor() {
   const [future, setFuture] = useState<CertificateField[][]>([]);
   const [pageSize, setPageSize] = useState<PdfPageSize | null>(null);
   const [previewSize, setPreviewSize] = useState<PdfPageSize | null>(null);
-  const [fields, setFields] = useState<CertificateField[]>([createField(1)]);
-  const [selectedFieldId, setSelectedFieldId] = useState(fields[0]?.id ?? "");
+  const [fields, setFields] = useState<CertificateField[]>([]);
+  const [selectedFieldId, setSelectedFieldId] = useState("");
   const [isRendering, setIsRendering] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [draggingFieldId, setDraggingFieldId] = useState<string | null>(null);
@@ -1171,7 +1171,7 @@ export function CertificateEditor() {
                           htmlFor="pdf-upload-empty"
                           className={cn(
                             buttonVariants({ size: "lg" }),
-                            "flex cursor-pointer items-center gap-2 px-10 h-12 rounded-full shadow-lg shadow-zinc-200"
+                            "flex cursor-pointer items-center gap-2 px-10 h-12 rounded-full"
                           )}
                         >
                           <FileUp className="size-4" />
