@@ -1,6 +1,7 @@
 import {
   degrees,
   PDFDocument,
+  type PDFPage,
   rgb,
   StandardFonts,
   type PDFFont,
@@ -128,6 +129,32 @@ function getAlignedX(line: string, field: CertificateField, font: PDFFont, fontS
   return field.x;
 }
 
+type DrawTextOptions = NonNullable<Parameters<PDFPage["drawText"]>[1]> & {
+  x: number;
+  y: number;
+  size: number;
+  font: PDFFont;
+};
+
+function drawTextWithLetterSpacing(
+  page: PDFPage,
+  text: string,
+  options: DrawTextOptions,
+  letterSpacing: number,
+) {
+  if (!letterSpacing) {
+    page.drawText(text, options);
+    return;
+  }
+
+  let currentX = options.x;
+
+  for (const character of Array.from(text)) {
+    page.drawText(character, { ...options, x: currentX });
+    currentX += options.font.widthOfTextAtSize(character, options.size) + letterSpacing;
+  }
+}
+
 async function embedImage(pdfDoc: PDFDocument, field: CertificateField) {
   if (!field.imageDataUrl || !field.imageMimeType) {
     return null;
@@ -148,7 +175,7 @@ async function embedImage(pdfDoc: PDFDocument, field: CertificateField) {
 }
 
 export async function generateCertificatePdf(
-  templateBytes: ArrayBuffer,
+  templateBytes: ArrayBuffer | Uint8Array,
   fields: CertificateField[],
 ) {
   const pdfDoc = await PDFDocument.load(templateBytes);
@@ -263,7 +290,7 @@ export async function generateCertificatePdf(
 
       // Draw Shadow if exists
       if (field.shadowColor) {
-        page.drawText(line, {
+        drawTextWithLetterSpacing(page, line, {
           x: x + (field.shadowOffsetX ?? 2),
           y: y - (field.shadowOffsetY ?? 2),
           size: fontSize,
@@ -271,11 +298,10 @@ export async function generateCertificatePdf(
           color: hexToRgb(field.shadowColor),
           opacity: field.shadowOpacity ?? 0.5,
           rotate: degrees(field.rotate ?? 0),
-          characterSpacing: field.letterSpacing ?? 0,
-        });
+        }, field.letterSpacing ?? 0);
       }
 
-      page.drawText(line, {
+      drawTextWithLetterSpacing(page, line, {
         x,
         y,
         size: fontSize,
@@ -283,8 +309,7 @@ export async function generateCertificatePdf(
         color: hexToRgb(field.color),
         opacity: field.opacity ?? 1,
         rotate: degrees(field.rotate ?? 0),
-        characterSpacing: field.letterSpacing ?? 0,
-      });
+      }, field.letterSpacing ?? 0);
 
       // Draw Decorations (Underline/Strikethrough)
       if (field.textDecoration && field.textDecoration !== "none") {

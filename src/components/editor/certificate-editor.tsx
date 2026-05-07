@@ -24,7 +24,7 @@ import {
   RotateCcw,
   Save,
   Search,
-  Settings2,
+  Pencil,
   Trash2,
   Moon,
   Sun,
@@ -43,7 +43,7 @@ import {
   Square,
   Circle,
   RotateCw,
-  Layers
+  Layers,
 } from "lucide-react";
 import Papa from "papaparse";
 
@@ -69,7 +69,11 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Menubar,
   MenubarContent,
@@ -100,8 +104,7 @@ import type {
   PdfPageSize,
 } from "@/types/certificate-field";
 
-const previewFontFamily: Record<string, string> = {
-};
+const previewFontFamily: Record<string, string> = {};
 
 const previewFontWeight: Record<CertificateFieldFontWeight, number> = {
   regular: 400,
@@ -126,7 +129,14 @@ const certificateFontGroups = [
   },
   {
     label: "Elegant Display",
-    fonts: ["Cinzel", "Prata", "Bodoni Moda", "Marcellus", "Forum", "DM Serif Display"],
+    fonts: [
+      "Cinzel",
+      "Prata",
+      "Bodoni Moda",
+      "Marcellus",
+      "Forum",
+      "DM Serif Display",
+    ],
   },
   {
     label: "Signature Script",
@@ -145,12 +155,16 @@ const certificateFontGroups = [
   },
 ];
 
-const googleCertificateFonts = certificateFontGroups
-  .flatMap((group) => group.fonts);
+const googleCertificateFonts = certificateFontGroups.flatMap(
+  (group) => group.fonts,
+);
 const googleCertificateFontSet = new Set(googleCertificateFonts);
 
 function getFontStack(fontFamily: string) {
-  return previewFontFamily[fontFamily] ?? `"${fontFamily}", Arial, Helvetica, sans-serif`;
+  return (
+    previewFontFamily[fontFamily] ??
+    `"${fontFamily}", Arial, Helvetica, sans-serif`
+  );
 }
 
 function googleFontUrl(fontFamilies: string[]) {
@@ -163,7 +177,10 @@ function googleFontUrl(fontFamilies: string[]) {
   }
 
   const query = families
-    .map((font) => `family=${font.trim().replace(/\s+/g, "+")}:wght@400;500;600;700`)
+    .map(
+      (font) =>
+        `family=${font.trim().replace(/\s+/g, "+")}:wght@400;500;600;700`,
+    )
     .join("&");
 
   return `https://fonts.googleapis.com/css2?${query}&display=swap`;
@@ -230,6 +247,30 @@ const defaultField: Omit<CertificateField, "id" | "label"> = {
   borderRadius: 0,
 };
 
+type CanvasPreset = "a4" | "a5";
+type CanvasOrientation = "portrait" | "landscape";
+
+const canvasPresets: Record<
+  CanvasPreset,
+  { label: string; width: number; height: number }
+> = {
+  a4: { label: "A4", width: 595.28, height: 841.89 },
+  a5: { label: "A5", width: 419.53, height: 595.28 },
+};
+
+function getCanvasSize(
+  preset: CanvasPreset,
+  orientation: CanvasOrientation,
+): PdfPageSize {
+  const size = canvasPresets[preset];
+
+  if (orientation === "landscape") {
+    return { width: size.height, height: size.width };
+  }
+
+  return { width: size.width, height: size.height };
+}
+
 function createField(index: number): CertificateField {
   return {
     ...defaultField,
@@ -238,7 +279,10 @@ function createField(index: number): CertificateField {
   };
 }
 
-function createShapeField(index: number, shapeType: "rectangle" | "circle" | "line"): CertificateField {
+function createShapeField(
+  index: number,
+  shapeType: "rectangle" | "circle" | "line",
+): CertificateField {
   const label = shapeType.charAt(0).toUpperCase() + shapeType.slice(1);
   return {
     ...defaultField,
@@ -298,9 +342,16 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-function arrayBufferToBase64(buffer: ArrayBuffer) {
+function uint8ArrayToArrayBuffer(bytes: Uint8Array) {
+  return bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer;
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer | Uint8Array) {
   let binary = "";
-  const bytes = new Uint8Array(buffer);
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
   const len = bytes.byteLength;
   for (let i = 0; i < len; i++) {
     binary += String.fromCharCode(bytes[i]);
@@ -349,13 +400,15 @@ async function saveTemplateToDB(bytes: ArrayBuffer, fileName: string) {
 
 async function loadTemplateFromDB() {
   const db = await initDB();
-  return new Promise<{ bytes: ArrayBuffer; fileName: string } | null>((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readonly");
-    const store = tx.objectStore(STORE_NAME);
-    const request = store.get("current");
-    request.onsuccess = () => resolve(request.result || null);
-    request.onerror = () => reject(request.error);
-  });
+  return new Promise<{ bytes: ArrayBuffer; fileName: string } | null>(
+    (resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readonly");
+      const store = tx.objectStore(STORE_NAME);
+      const request = store.get("current");
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error);
+    },
+  );
 }
 
 async function clearTemplateFromDB() {
@@ -365,6 +418,21 @@ async function clearTemplateFromDB() {
 }
 
 type BulkRow = Record<string, string>;
+type SaveFilePickerHandle = {
+  createWritable: () => Promise<{
+    write: (data: string) => Promise<void>;
+    close: () => Promise<void>;
+  }>;
+};
+type SaveFilePickerWindow = Window & {
+  showSaveFilePicker: (options: {
+    suggestedName: string;
+    types: Array<{
+      description: string;
+      accept: Record<string, string[]>;
+    }>;
+  }) => Promise<SaveFilePickerHandle>;
+};
 
 export function CertificateEditor() {
   const [fileName, setFileName] = useState<string>("");
@@ -387,19 +455,22 @@ export function CertificateEditor() {
   const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
   const [bulkRows, setBulkRows] = useState<BulkRow[]>([]);
   const [bulkPreviewIndex, setBulkPreviewIndex] = useState(0);
-  const [filenameTemplate, setFilenameTemplate] = useState("sertifikat-{row}.pdf");
+  const [filenameTemplate, setFilenameTemplate] = useState(
+    "certificate-{row}.pdf",
+  );
   const [isLoaded, setIsLoaded] = useState(false);
-  const [isResetDialogOpen, setIsResetDialogOpen] = useState(false);
+  const [isBlankProjectDialogOpen, setIsBlankProjectDialogOpen] =
+    useState(false);
+  const [isNewProjectDialogOpen, setIsNewProjectDialogOpen] = useState(false);
+  const [blankCanvasPreset, setBlankCanvasPreset] =
+    useState<CanvasPreset>("a4");
+  const [blankCanvasOrientation, setBlankCanvasOrientation] =
+    useState<CanvasOrientation>("landscape");
   const [isTooSmall, setIsTooSmall] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const projectInputRef = useRef<HTMLInputElement>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
   const { theme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   const selectedField = useMemo(
     () => fields.find((field) => field.id === selectedFieldId) ?? fields[0],
@@ -413,7 +484,11 @@ export function CertificateEditor() {
         // Load configurations
         const savedState = localStorage.getItem("certgen-config");
         if (savedState) {
-          const { fields: f, filenameTemplate: ft, bulkRows: br } = JSON.parse(savedState);
+          const {
+            fields: f,
+            filenameTemplate: ft,
+            bulkRows: br,
+          } = JSON.parse(savedState);
           setFields(f);
           setFilenameTemplate(ft);
           setBulkRows(br);
@@ -473,7 +548,9 @@ export function CertificateEditor() {
       const page = await pdf.getPage(1);
       const baseViewport = page.getViewport({ scale: 1 });
       const containerWidth = Math.min(860, window.innerWidth - 520);
-      const scale = (Math.max(0.55, Math.min(1.35, containerWidth / baseViewport.width))) * canvasZoom;
+      const scale =
+        Math.max(0.55, Math.min(1.35, containerWidth / baseViewport.width)) *
+        canvasZoom;
       const viewport = page.getViewport({ scale });
       const canvas = canvasRef.current;
 
@@ -593,7 +670,13 @@ export function CertificateEditor() {
     saveHistory(fields);
     const field = fields.find((f) => f.id === id);
     if (field) {
-      const next = { ...field, id: crypto.randomUUID(), label: `${field.label} (Copy)`, x: field.x + 20, y: field.y - 20 };
+      const next = {
+        ...field,
+        id: crypto.randomUUID(),
+        label: `${field.label} (Copy)`,
+        x: field.x + 20,
+        y: field.y - 20,
+      };
       setFields((current) => [next, ...current]);
       setSelectedFieldId(next.id);
     }
@@ -601,7 +684,9 @@ export function CertificateEditor() {
 
   function updateField(id: string, patch: Partial<CertificateField>) {
     setFields((current) =>
-      current.map((field) => (field.id === id ? { ...field, ...patch } : field)),
+      current.map((field) =>
+        field.id === id ? { ...field, ...patch } : field,
+      ),
     );
   }
 
@@ -610,30 +695,40 @@ export function CertificateEditor() {
       return;
     }
 
-    let bytes = await file.arrayBuffer();
+    let bytes: Uint8Array<ArrayBufferLike> = new Uint8Array(
+      await file.arrayBuffer(),
+    );
     let finalFileName = file.name;
 
     // If image, convert to PDF
     if (file.type.startsWith("image/") || file.name.match(/\.(png|jpe?g)$/i)) {
       try {
         const pdfDoc = await PDFDocument.create();
-        const image = file.type === "image/png" ? await pdfDoc.embedPng(bytes) : await pdfDoc.embedJpg(bytes);
+        const image =
+          file.type === "image/png"
+            ? await pdfDoc.embedPng(bytes)
+            : await pdfDoc.embedJpg(bytes);
         const page = pdfDoc.addPage([image.width, image.height]);
-        page.drawImage(image, { x: 0, y: 0, width: image.width, height: image.height });
+        page.drawImage(image, {
+          x: 0,
+          y: 0,
+          width: image.width,
+          height: image.height,
+        });
         bytes = await pdfDoc.save();
         finalFileName = finalFileName.replace(/\.(png|jpe?g)$/i, ".pdf");
         if (!finalFileName.endsWith(".pdf")) finalFileName += ".pdf";
-        toast.success("Gambar berhasil dikonversi ke PDF!");
+        toast.success("Image converted to PDF.");
       } catch (error) {
         console.error("Image to PDF conversion error:", error);
-        toast.error("Gagal mengonversi gambar ke PDF.");
+        toast.error("Failed to convert image to PDF.");
         return;
       }
     }
 
     setFileName(finalFileName);
     setTemplateBytes(bytes);
-    void saveTemplateToDB(bytes, finalFileName);
+    void saveTemplateToDB(uint8ArrayToArrayBuffer(bytes), finalFileName);
   }
 
   async function exportProject() {
@@ -651,7 +746,9 @@ export function CertificateEditor() {
     // Try to use File System Access API for "Save As" functionality
     if ("showSaveFilePicker" in window) {
       try {
-        const handle = await (window as any).showSaveFilePicker({
+        const handle = await (
+          window as SaveFilePickerWindow
+        ).showSaveFilePicker({
           suggestedName: `certgen-project-${fileName?.replace(".pdf", "") || "new"}.json`,
           types: [
             {
@@ -664,53 +761,107 @@ export function CertificateEditor() {
         await writable.write(json);
         await writable.close();
         return;
-      } catch (err: any) {
+      } catch (err: unknown) {
         // If user cancels, we just exit
-        if (err.name === "AbortError") return;
-        console.warn("File System Access API failed, falling back to download:", err);
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        console.warn(
+          "File System Access API failed, falling back to download:",
+          err,
+        );
       }
     }
 
     // Fallback: standard download
     const blob = new Blob([json], { type: "application/json" });
-    downloadBlob(blob, `certgen-project-${fileName?.replace(".pdf", "") || "new"}.json`);
+    downloadBlob(
+      blob,
+      `certgen-project-${fileName?.replace(".pdf", "") || "new"}.json`,
+    );
+  }
+
+  async function importProjectFile(file: File) {
+    try {
+      const data = JSON.parse(await file.text());
+      if (data.fields) setFields(data.fields);
+      if (data.filenameTemplate) setFilenameTemplate(data.filenameTemplate);
+      if (data.bulkRows) setBulkRows(data.bulkRows);
+      setFileName(data.fileName || "");
+
+      // Restore PDF if included in project file
+      if (data.pdfBase64) {
+        const bytes = base64ToArrayBuffer(data.pdfBase64);
+        setTemplateBytes(new Uint8Array(bytes));
+        void saveTemplateToDB(bytes, data.fileName || "project.pdf");
+      } else {
+        setTemplateBytes(null);
+        setPageSize(null);
+        setPreviewSize(null);
+        void clearTemplateFromDB();
+      }
+
+      setSelectedFieldId(data.fields?.[0]?.id || "");
+      toast.success("Project loaded.");
+    } catch (err) {
+      console.error("Import error:", err);
+      toast.error(
+        "Failed to load project file. Check that the file format is valid.",
+      );
+    }
   }
 
   function importProject(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const data = JSON.parse(e.target?.result as string);
-        if (data.fields) setFields(data.fields);
-        if (data.filenameTemplate) setFilenameTemplate(data.filenameTemplate);
-        if (data.bulkRows) setBulkRows(data.bulkRows);
-        if (data.fileName) setFileName(data.fileName);
-
-        // Restore PDF if included in project file
-        if (data.pdfBase64) {
-          const bytes = base64ToArrayBuffer(data.pdfBase64);
-          setTemplateBytes(bytes);
-          void saveTemplateToDB(bytes, data.fileName || "project.pdf");
-        }
-
-        if (data.fields?.[0]) setSelectedFieldId(data.fields[0].id);
-        toast.success("Proyek berhasil dimuat!");
-      } catch (err) {
-        console.error("Import error:", err);
-        toast.error("Gagal memuat file proyek. Pastikan format file benar.");
-      }
-    };
-    reader.readAsText(file);
+    if (file) {
+      void importProjectFile(file);
+    }
     event.target.value = ""; // Reset input
   }
 
-  function handleResetConfirm() {
+  async function createBlankProject() {
+    const size = getCanvasSize(blankCanvasPreset, blankCanvasOrientation);
+    const pdfDoc = await PDFDocument.create();
+    pdfDoc.addPage([size.width, size.height]);
+    const bytes = await pdfDoc.save();
+    const blankBuffer = uint8ArrayToArrayBuffer(bytes);
+    const nextFileName = `blank-${blankCanvasPreset}-${blankCanvasOrientation}.pdf`;
+
+    localStorage.removeItem("certgen-config");
+    setPast([]);
+    setFuture([]);
+    setFields([]);
+    setSelectedFieldId("");
+    setBulkRows([]);
+    setBulkPreviewIndex(0);
+    setFilenameTemplate("certificate-{row}.pdf");
+    setFileName(nextFileName);
+    setTemplateBytes(bytes);
+    setPageSize(null);
+    setPreviewSize(null);
+    resetCanvasView();
+    await saveTemplateToDB(blankBuffer, nextFileName);
+    setIsBlankProjectDialogOpen(false);
+    toast.success("Blank project created.");
+  }
+
+  function returnToStartPage() {
     localStorage.removeItem("certgen-config");
     void clearTemplateFromDB();
-    window.location.reload();
+    setPast([]);
+    setFuture([]);
+    setFileName("");
+    setTemplateBytes(null);
+    setPageSize(null);
+    setPreviewSize(null);
+    setFields([]);
+    setSelectedFieldId("");
+    setBulkRows([]);
+    setBulkPreviewIndex(0);
+    setFilenameTemplate("certificate-{row}.pdf");
+    setEditingFieldId(null);
+    setDraggingFieldId(null);
+    resetCanvasView();
+    setIsNewProjectDialogOpen(false);
+    toast.message("Ready for a new project.");
   }
 
   async function generatePdf() {
@@ -720,7 +871,7 @@ export function CertificateEditor() {
 
     setIsGenerating(true);
     const bytes = await generateCertificatePdf(templateBytes.slice(0), fields);
-    const safeName = fileName.replace(/\.pdf$/i, "") || "sertifikat";
+    const safeName = fileName.replace(/\.pdf$/i, "") || "certificate";
     downloadBytes(bytes, `${safeName}-generated.pdf`);
     setIsGenerating(false);
   }
@@ -731,7 +882,10 @@ export function CertificateEditor() {
 
     try {
       // 1. Generate the final PDF with fields
-      const pdfBytes = await generateCertificatePdf(templateBytes.slice(0), fields);
+      const pdfBytes = await generateCertificatePdf(
+        templateBytes.slice(0),
+        fields,
+      );
 
       // 2. Load the generated PDF with pdfjs
       const pdfjs = await import("pdfjs-dist");
@@ -758,15 +912,15 @@ export function CertificateEditor() {
       // 4. Convert to JPG and download
       const dataUrl = canvas.toDataURL("image/jpeg", 0.95);
       const link = document.createElement("a");
-      const safeName = fileName.replace(/\.pdf$/i, "") || "sertifikat";
+      const safeName = fileName.replace(/\.pdf$/i, "") || "certificate";
       link.href = dataUrl;
       link.download = `${safeName}.jpg`;
       link.click();
 
-      toast.success("JPG berhasil diunduh!");
+      toast.success("JPG downloaded.");
     } catch (error) {
       console.error("JPG generation error:", error);
-      toast.error("Gagal membuat JPG.");
+      toast.error("Failed to create JPG.");
     } finally {
       setIsGenerating(false);
     }
@@ -801,10 +955,12 @@ export function CertificateEditor() {
       .replace(/\s+/g, " ")
       .trim();
 
-    return safe.toLowerCase().endsWith(".pdf") ? safe : `${safe || `sertifikat-${rowIndex + 1}`}.pdf`;
+    return safe.toLowerCase().endsWith(".pdf")
+      ? safe
+      : `${safe || `certificate-${rowIndex + 1}`}.pdf`;
   }
 
-  async function generateBulkZip(type: 'pdf' | 'jpg' = 'pdf') {
+  async function generateBulkZip(type: "pdf" | "jpg" = "pdf") {
     if (!templateBytes || !bulkRows.length) {
       return;
     }
@@ -821,10 +977,13 @@ export function CertificateEditor() {
 
       for (const [index, row] of bulkRows.entries()) {
         const fieldsForRow = applyBulkRow(row);
-        const pdfBytes = await generateCertificatePdf(templateBytes.slice(0), fieldsForRow);
+        const pdfBytes = await generateCertificatePdf(
+          templateBytes.slice(0),
+          fieldsForRow,
+        );
         const filename = buildBulkFilename(row, index);
 
-        if (type === 'pdf') {
+        if (type === "pdf") {
           zip.file(filename, pdfBytes);
         } else {
           // Convert to JPG
@@ -837,24 +996,29 @@ export function CertificateEditor() {
           canvas.height = viewport.height;
           const context = canvas.getContext("2d");
           if (context) {
-            await page.render({ canvas, canvasContext: context, viewport }).promise;
+            await page.render({ canvas, canvasContext: context, viewport })
+              .promise;
             const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
-            const base64Data = dataUrl.split(',')[1];
-            zip.file(filename.replace(/\.pdf$/i, ".jpg"), base64Data, { base64: true });
+            const base64Data = dataUrl.split(",")[1];
+            zip.file(filename.replace(/\.pdf$/i, ".jpg"), base64Data, {
+              base64: true,
+            });
           }
         }
       }
 
-      downloadBlob(await zip.generateAsync({ type: "blob" }), `certgen-bulk-${type}.zip`);
-      toast.success(`Bulk ${type.toUpperCase()} berhasil dibuat!`);
+      downloadBlob(
+        await zip.generateAsync({ type: "blob" }),
+        `certgen-bulk-${type}.zip`,
+      );
+      toast.success(`Bulk ${type.toUpperCase()} created.`);
     } catch (error) {
       console.error("Bulk generation error:", error);
-      toast.error(`Gagal membuat bulk ${type.toUpperCase()}.`);
+      toast.error(`Failed to create bulk ${type.toUpperCase()}.`);
     } finally {
       setIsGenerating(false);
     }
   }
-
 
   function zoomCanvas(delta: number) {
     setCanvasZoom((current) => {
@@ -904,7 +1068,19 @@ export function CertificateEditor() {
     setIsPdfDragOver(false);
     const file = event.dataTransfer.files[0];
 
-    if (file?.type === "application/pdf" || file?.name.toLowerCase().endsWith(".pdf")) {
+    if (
+      file?.type === "application/json" ||
+      file?.name.toLowerCase().endsWith(".json")
+    ) {
+      void importProjectFile(file);
+      return;
+    }
+
+    if (
+      file?.type === "application/pdf" ||
+      file?.type.startsWith("image/") ||
+      file?.name.toLowerCase().match(/\.(pdf|png|jpe?g)$/)
+    ) {
       void handleFile(file);
     }
   }
@@ -939,10 +1115,11 @@ export function CertificateEditor() {
         <div className="mb-8 flex size-24 items-center justify-center rounded-3xl bg-white/10 text-white shadow-2xl">
           <MonitorOff className="size-12" />
         </div>
-        <h1 className="text-2xl font-bold tracking-tight">Layar Terlalu Kecil</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Screen Too Small</h1>
         <p className="mt-4 max-w-md text-sm leading-relaxed text-zinc-400">
-          CertGen memerlukan lebar layar minimal <strong>1200px</strong> untuk pengalaman pengeditan yang optimal.
-          Mohon gunakan perangkat desktop atau perbesar jendela browser Anda.
+          CertGen requires a minimum screen width of <strong>1200px</strong> for
+          an optimal editing experience. Use a desktop device or make your
+          browser window wider.
         </p>
         <div className="mt-10 h-1 w-24 rounded-full bg-zinc-800" />
       </div>
@@ -958,31 +1135,45 @@ export function CertificateEditor() {
               <MenubarMenu>
                 <MenubarTrigger>File</MenubarTrigger>
                 <MenubarContent>
-                  <MenubarItem onClick={() => setIsResetDialogOpen(true)}>
-                    <FilePlus className="mr-2 size-4 text-muted-foreground" />
+                  <MenubarItem onClick={() => setIsNewProjectDialogOpen(true)}>
+                    <FilePlus className="size-3 text-muted-foreground" />
                     New Project
                   </MenubarItem>
                   <MenubarItem onClick={() => projectInputRef.current?.click()}>
-                    <FolderOpen className="mr-2 size-4 text-muted-foreground" />
+                    <FolderOpen className="size-3 text-muted-foreground" />
                     Open Project
                   </MenubarItem>
                   <MenubarSeparator />
-                  <MenubarItem onClick={exportProject} disabled={!templateBytes}>
-                    <Save className="mr-2 size-4 text-muted-foreground" />
+                  <MenubarItem
+                    onClick={exportProject}
+                    disabled={!templateBytes}
+                  >
+                    <Save className="size-3 text-muted-foreground" />
                     Save Project
                   </MenubarItem>
                   <MenubarSub>
                     <MenubarSubTrigger>
-                      <Download className="mr-2 size-4 text-muted-foreground" />
+                      <Download className="size-3 text-muted-foreground" />
                       Download
                     </MenubarSubTrigger>
                     <MenubarSubContent>
-                      <MenubarItem onClick={generatePdf} disabled={!templateBytes || isGenerating}>
-                        <FileText className={cn("mr-2 size-4 text-muted-foreground", isGenerating && "animate-bounce")} />
+                      <MenubarItem
+                        onClick={generatePdf}
+                        disabled={!templateBytes || isGenerating}
+                      >
+                        <FileText
+                          className={cn(
+                            "size-3 text-muted-foreground",
+                            isGenerating && "animate-bounce",
+                          )}
+                        />
                         PDF
                       </MenubarItem>
-                      <MenubarItem onClick={generateJpg} disabled={!templateBytes || isGenerating}>
-                        <ImageIcon className="mr-2 size-4 text-muted-foreground" />
+                      <MenubarItem
+                        onClick={generateJpg}
+                        disabled={!templateBytes || isGenerating}
+                      >
+                        <ImageIcon className="size-3 text-muted-foreground" />
                         JPG
                       </MenubarItem>
                     </MenubarSubContent>
@@ -993,8 +1184,11 @@ export function CertificateEditor() {
               <MenubarMenu>
                 <MenubarTrigger>Edit</MenubarTrigger>
                 <MenubarContent>
-                  <MenubarItem onClick={() => pdfInputRef.current?.click()} disabled={!templateBytes}>
-                    <FileUp className="mr-2 size-4 text-muted-foreground" />
+                  <MenubarItem
+                    onClick={() => pdfInputRef.current?.click()}
+                    disabled={!templateBytes}
+                  >
+                    <FileUp className="size-3 text-muted-foreground" />
                     Change PDF / Image
                   </MenubarItem>
                 </MenubarContent>
@@ -1003,17 +1197,21 @@ export function CertificateEditor() {
               <MenubarMenu>
                 <MenubarTrigger>View</MenubarTrigger>
                 <MenubarContent>
-                  <MenubarItem onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
+                  <MenubarItem
+                    onClick={() =>
+                      setTheme(theme === "dark" ? "light" : "dark")
+                    }
+                  >
                     {theme === "dark" ? (
-                      <Sun className="mr-2 size-4 text-muted-foreground" />
+                      <Sun className="size-3 text-muted-foreground" />
                     ) : (
-                      <Moon className="mr-2 size-4 text-muted-foreground" />
+                      <Moon className="size-3 text-muted-foreground" />
                     )}
                     Toggle Theme
                   </MenubarItem>
                   <MenubarSeparator />
                   <MenubarItem onClick={() => setCanvasZoom(1)}>
-                    <RotateCcw className="mr-2 size-4 text-muted-foreground" />
+                    <RotateCcw className="size-3 text-muted-foreground" />
                     Reset Zoom
                   </MenubarItem>
                 </MenubarContent>
@@ -1061,7 +1259,7 @@ export function CertificateEditor() {
             onDrop={handleDrop}
           >
             {templateBytes ? (
-              <div className="absolute right-4 top-4 z-20 flex items-center gap-1.5 rounded-md border bg-background/80 backdrop-blur-md px-1 py-0.5 text-[10px] font-medium shadow-sm transition-colors duration-300">
+              <div className="absolute right-4 top-4 z-20 flex items-center gap-1.5 rounded-md border bg-background/80 backdrop-blur-md px-1 py-0.5 text-[10px] font-medium transition-colors duration-300">
                 <div className="flex items-center gap-0.5 border-r pr-1.5 mr-0.5">
                   <Tooltip>
                     <TooltipTrigger
@@ -1096,7 +1294,9 @@ export function CertificateEditor() {
                         </Button>
                       }
                     />
-                    <TooltipContent side="bottom">Redo (Cmd+Shift+Z)</TooltipContent>
+                    <TooltipContent side="bottom">
+                      Redo (Cmd+Shift+Z)
+                    </TooltipContent>
                   </Tooltip>
                 </div>
 
@@ -1118,7 +1318,9 @@ export function CertificateEditor() {
                   <TooltipContent side="bottom">Zoom out</TooltipContent>
                 </Tooltip>
 
-                <span className="min-w-8 text-center">{Math.round(canvasZoom * 100)}%</span>
+                <span className="min-w-8 text-center">
+                  {Math.round(canvasZoom * 100)}%
+                </span>
 
                 <Tooltip>
                   <TooltipTrigger
@@ -1162,27 +1364,34 @@ export function CertificateEditor() {
                           CertGen
                         </h1>
                         <p className="mt-3 text-muted-foreground">
-                          Tools bikin sertifikat PDF masal yang efisien
+                          Efficient bulk PDF certificate tools
                         </p>
                       </div>
 
-                      <div className="relative z-20 flex flex-col items-center gap-4">
+                      <div className="relative z-20 flex flex-col items-center gap-2">
                         <label
                           htmlFor="pdf-upload-empty"
-                          className={cn(
-                            buttonVariants({ size: "lg" }),
-                            "flex cursor-pointer items-center gap-2 px-10 h-12 rounded-full"
-                          )}
+                          className={cn(buttonVariants({ size: "lg" }), "")}
                         >
                           <FileUp className="size-4" />
-                          Mulai dengan PDF / Gambar
+                          Start with PDF / Image
                         </label>
+
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="lg"
+                          onClick={() => setIsBlankProjectDialogOpen(true)}
+                        >
+                          <FilePlus className="size-4" />
+                          Blank Project
+                        </Button>
 
                         <label
                           htmlFor="project-import-empty"
                           className={cn(
-                            buttonVariants({ variant: "outline", size: "lg" }),
-                            "flex cursor-pointer items-center gap-2 px-10 h-12 rounded-full border-border bg-card hover:bg-accent transition-all"
+                            buttonVariants({ variant: "ghost", size: "lg" }),
+                            "",
                           )}
                         >
                           <FolderOpen className="size-4" />
@@ -1195,7 +1404,9 @@ export function CertificateEditor() {
                         type="file"
                         accept="application/pdf,image/png,image/jpeg"
                         className="hidden"
-                        onChange={(event) => handleFile(event.target.files?.[0] ?? null)}
+                        onChange={(event) =>
+                          handleFile(event.target.files?.[0] ?? null)
+                        }
                       />
                       <input
                         id="project-import-empty"
@@ -1216,36 +1427,41 @@ export function CertificateEditor() {
                     ) : null}
                     {canPreviewFields
                       ? previewFields.map((field) => (
-                        <PreviewField
-                          key={field.id}
-                          field={field}
-                          fields={fields}
-                          pageSize={pageSize}
-                          previewSize={previewSize}
-                          canvasZoom={canvasZoom}
-                          selected={field.id === selectedFieldId}
-                          dragging={field.id === draggingFieldId}
-                          editing={field.id === editingFieldId}
-                          onSelect={() => setSelectedFieldId(field.id)}
-                          onEditStart={() => {
-                            saveHistory(fields);
-                            setSelectedFieldId(field.id);
-                            setEditingFieldId(field.id);
-                          }}
-                          onEditEnd={() => setEditingFieldId(null)}
-                          onDragStart={() => {
-                            saveHistory(fields);
-                            setDraggingFieldId(field.id);
-                          }}
-                          onDragEnd={() => setDraggingFieldId(null)}
-                          onResizeStart={() => saveHistory(fields)}
-                          onMove={(x, y) => updateField(field.id, { x, y })}
-                          onValueChange={(value) => updateField(field.id, { value })}
-                          onResize={(width, height) =>
-                            updateField(field.id, { width, height })
-                          }
-                        />
-                      ))
+                          <PreviewField
+                            key={field.id}
+                            field={field}
+                            fields={fields}
+                            pageSize={pageSize}
+                            previewSize={previewSize}
+                            canvasZoom={canvasZoom}
+                            selected={field.id === selectedFieldId}
+                            dragging={field.id === draggingFieldId}
+                            editing={field.id === editingFieldId}
+                            onSelect={() => setSelectedFieldId(field.id)}
+                            onEditStart={() => {
+                              saveHistory(fields);
+                              setSelectedFieldId(field.id);
+                              setEditingFieldId(field.id);
+                            }}
+                            onEditEnd={() => setEditingFieldId(null)}
+                            onDragStart={() => {
+                              saveHistory(fields);
+                              setDraggingFieldId(field.id);
+                            }}
+                            onDragEnd={() => setDraggingFieldId(null)}
+                            onResizeStart={() => saveHistory(fields)}
+                            onMove={(x, y) => updateField(field.id, { x, y })}
+                            onValueChange={(value) =>
+                              updateField(field.id, { value })
+                            }
+                            onImageChange={(patch) =>
+                              updateField(field.id, patch)
+                            }
+                            onResize={(width, height) =>
+                              updateField(field.id, { width, height })
+                            }
+                          />
+                        ))
                       : null}
                   </div>
                 )}
@@ -1281,21 +1497,110 @@ export function CertificateEditor() {
           ) : null}
         </div>
 
-        <Dialog open={isResetDialogOpen} onOpenChange={setIsResetDialogOpen}>
+        <Dialog
+          open={isNewProjectDialogOpen}
+          onOpenChange={setIsNewProjectDialogOpen}
+        >
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Buat Proyek Baru?</DialogTitle>
+              <DialogTitle>Start a New Project?</DialogTitle>
               <DialogDescription>
-                Tindakan ini akan menghapus semua field, data bulk, dan template PDF yang sedang
-                dikerjakan untuk memulai dari awal. Proyek yang belum disimpan akan hilang.
+                The current project will be closed and you will return to the
+                start page. Save the project first if you still need it.
               </DialogDescription>
             </DialogHeader>
             <DialogFooter className="gap-2">
-              <Button variant="ghost" onClick={() => setIsResetDialogOpen(false)}>
-                Batal
+              <Button
+                variant="ghost"
+                onClick={() => setIsNewProjectDialogOpen(false)}
+              >
+                Cancel
               </Button>
-              <Button variant="destructive" onClick={handleResetConfirm}>
-                Ya, Proyek Baru
+              <Button variant="destructive" onClick={returnToStartPage}>
+                Yes, New Project
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog
+          open={isBlankProjectDialogOpen}
+          onOpenChange={setIsBlankProjectDialogOpen}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Create Blank Project</DialogTitle>
+              <DialogDescription>
+                Start from a white canvas without a PDF or image template. The
+                current project will be replaced.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-5 py-2">
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold text-muted-foreground">
+                  Canvas Size
+                </Label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(Object.keys(canvasPresets) as CanvasPreset[]).map(
+                    (preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        className={cn(
+                          "rounded-md border p-3 text-left transition-colors",
+                          blankCanvasPreset === preset
+                            ? "border-primary bg-primary/10"
+                            : "border-border bg-muted/30 hover:bg-muted/50",
+                        )}
+                        onClick={() => setBlankCanvasPreset(preset)}
+                      >
+                        <span className="block text-sm font-semibold">
+                          {canvasPresets[preset].label}
+                        </span>
+                        <span className="mt-1 block text-[10px] text-muted-foreground">
+                          {Math.round(canvasPresets[preset].width)} x{" "}
+                          {Math.round(canvasPresets[preset].height)} pt
+                        </span>
+                      </button>
+                    ),
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold text-muted-foreground">
+                  Orientation
+                </Label>
+                <div className="grid grid-cols-2 gap-2 rounded-md bg-muted/40 p-1">
+                  {(["portrait", "landscape"] as CanvasOrientation[]).map(
+                    (orientation) => (
+                      <button
+                        key={orientation}
+                        type="button"
+                        className={cn(
+                          "rounded px-3 py-2 text-xs font-medium capitalize transition-colors",
+                          blankCanvasOrientation === orientation
+                            ? "bg-background text-foreground shadow-sm"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                        onClick={() => setBlankCanvasOrientation(orientation)}
+                      >
+                        {orientation}
+                      </button>
+                    ),
+                  )}
+                </div>
+              </div>
+            </div>
+            <DialogFooter className="gap-2">
+              <Button
+                variant="ghost"
+                onClick={() => setIsBlankProjectDialogOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button onClick={() => void createBlankProject()}>
+                Create Project
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -1342,18 +1647,20 @@ function SidebarEditor({
   onBulkRowsChange: (rows: BulkRow[]) => void;
   onBulkPreviewIndexChange: (index: number) => void;
   onFilenameTemplateChange: (value: string) => void;
-  onGenerateBulk: (type: 'pdf' | 'jpg') => void;
+  onGenerateBulk: (type: "pdf" | "jpg") => void;
   isGenerating: boolean;
   fileName: string;
 }) {
   const [activeSidebarTab, setActiveSidebarTab] = useState("fields");
   const [expandedFieldId, setExpandedFieldId] = useState<string | null>(null);
-  const [fieldToDelete, setFieldToDelete] = useState<CertificateField | null>(null);
+  const [fieldToDelete, setFieldToDelete] = useState<CertificateField | null>(
+    null,
+  );
 
   // Sync expanded state with selection
   useEffect(() => {
     if (selectedFieldId) {
-      setExpandedFieldId(selectedFieldId);
+      queueMicrotask(() => setExpandedFieldId(selectedFieldId));
     }
   }, [selectedFieldId]);
 
@@ -1386,13 +1693,20 @@ function SidebarEditor({
         <div className="border-b px-4 py-4">
           <div className="mb-3">
             <h2 className="text-sm font-semibold">CertGen</h2>
-            <p className="max-w-[180px] truncate text-[10px] text-muted-foreground" title={fileName}>
-             File : {fileName || "Editor Sertifikat"}
+            <p
+              className="max-w-[180px] truncate text-[10px] text-muted-foreground"
+              title={fileName}
+            >
+              File: {fileName || "Certificate Editor"}
             </p>
           </div>
           <TabsList className="h-9 w-full bg-input/50 p-1">
-            <TabsTrigger value="fields" className="flex-1 transition-all">Fields</TabsTrigger>
-            <TabsTrigger value="bulk" className="flex-1 transition-all">Bulk</TabsTrigger>
+            <TabsTrigger value="fields" className="flex-1 transition-all">
+              Fields
+            </TabsTrigger>
+            <TabsTrigger value="bulk" className="flex-1 transition-all">
+              Bulk
+            </TabsTrigger>
           </TabsList>
         </div>
 
@@ -1421,22 +1735,32 @@ function SidebarEditor({
                     }
                   />
                   <DropdownMenuContent align="end" className="w-32">
-                    <DropdownMenuItem onClick={() => handleAddShapeField("rectangle")}>
-                      <Square className="mr-2 size-4 text-muted-foreground" />
+                    <DropdownMenuItem
+                      onClick={() => handleAddShapeField("rectangle")}
+                    >
+                      <Square className="size-4 text-muted-foreground" />
                       Rectangle
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => handleAddShapeField("circle")}>
-                      <Circle className="mr-2 size-4 text-muted-foreground" />
+                    <DropdownMenuItem
+                      onClick={() => handleAddShapeField("circle")}
+                    >
+                      <Circle className="size-4 text-muted-foreground" />
                       Circle
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => handleAddShapeField("line")}>
-                      <Minus className="mr-2 size-4 text-muted-foreground" />
+                    <DropdownMenuItem
+                      onClick={() => handleAddShapeField("line")}
+                    >
+                      <Minus className="size-4 text-muted-foreground" />
                       Line
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
 
-                <Button size="sm" variant="outline" onClick={handleAddImageField}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleAddImageField}
+                >
                   <ImageIcon className="mr-1.5 size-3" />
                   Image
                 </Button>
@@ -1448,9 +1772,9 @@ function SidebarEditor({
                   <div className="mb-2 rounded-full bg-zinc-50 p-3">
                     <Plus className="size-6 text-zinc-400" />
                   </div>
-                  <p className="text-sm font-medium">Belum ada field</p>
+                  <p className="text-sm font-medium">No fields yet</p>
                   <p className="max-w-[200px] text-xs text-muted-foreground">
-                    Tambah field teks atau gambar untuk mulai mengedit sertifikat.
+                    Add a text or image field to start editing the certificate.
                   </p>
                 </div>
               ) : (
@@ -1459,7 +1783,9 @@ function SidebarEditor({
                     key={field.id}
                     className={cn(
                       "w-full overflow-hidden rounded-md border text-sm transition-colors",
-                      field.id === selectedFieldId ? "border-primary/50 bg-input/50" : "bg-input/30 border-border hover:bg-muted/50",
+                      field.id === selectedFieldId
+                        ? "border-primary/50 bg-input/50"
+                        : "bg-input/30 border-border hover:bg-muted/50",
                     )}
                   >
                     <div className="flex items-start justify-between gap-1 p-3">
@@ -1468,7 +1794,9 @@ function SidebarEditor({
                         className="min-w-0 flex-1 text-left"
                         onClick={() => onSelectField(field.id)}
                       >
-                        <span className="block truncate font-medium text-foreground">{field.label}</span>
+                        <span className="block truncate font-medium text-foreground">
+                          {field.label}
+                        </span>
                         <span className="mt-1 block truncate text-[10px] text-muted-foreground">
                           {field.type === "image"
                             ? field.imageDataUrl
@@ -1486,7 +1814,7 @@ function SidebarEditor({
                                 size="icon"
                                 variant="ghost"
                                 className="size-8"
-                                aria-label={`Duplikasi ${field.label}`}
+                                aria-label={`Duplicate ${field.label}`}
                                 onClick={() => {
                                   onDuplicateField(field.id);
                                 }}
@@ -1495,10 +1823,10 @@ function SidebarEditor({
                               </Button>
                             }
                           />
-                          <TooltipContent side="bottom">Duplikasi field</TooltipContent>
+                          <TooltipContent side="bottom">
+                            Duplicate field
+                          </TooltipContent>
                         </Tooltip>
-
-
 
                         <Tooltip>
                           <TooltipTrigger
@@ -1510,12 +1838,14 @@ function SidebarEditor({
                                 className="size-8"
                                 aria-label={
                                   field.visible
-                                    ? `Sembunyikan ${field.label}`
-                                    : `Tampilkan ${field.label}`
+                                    ? `Hide ${field.label}`
+                                    : `Show ${field.label}`
                                 }
                                 onClick={() => {
                                   onSelectField(field.id);
-                                  onUpdateField(field.id, { visible: !field.visible });
+                                  onUpdateField(field.id, {
+                                    visible: !field.visible,
+                                  });
                                 }}
                               >
                                 {field.visible ? (
@@ -1527,7 +1857,7 @@ function SidebarEditor({
                             }
                           />
                           <TooltipContent side="bottom">
-                            {field.visible ? "Sembunyikan field" : "Tampilkan field"}
+                            {field.visible ? "Hide field" : "Show field"}
                           </TooltipContent>
                         </Tooltip>
 
@@ -1537,19 +1867,29 @@ function SidebarEditor({
                               <Button
                                 type="button"
                                 size="icon"
-                                variant={expandedFieldId === field.id ? "default" : "ghost"}
+                                variant={
+                                  expandedFieldId === field.id
+                                    ? "default"
+                                    : "ghost"
+                                }
                                 className="size-8"
                                 aria-label={`Edit styling ${field.label}`}
                                 onClick={() => {
                                   onSelectField(field.id);
-                                  setExpandedFieldId(expandedFieldId === field.id ? null : field.id);
+                                  setExpandedFieldId(
+                                    expandedFieldId === field.id
+                                      ? null
+                                      : field.id,
+                                  );
                                 }}
                               >
-                                <Settings2 className="size-4" />
+                                <Pencil className="size-4" />
                               </Button>
                             }
                           />
-                          <TooltipContent side="bottom">Edit styling</TooltipContent>
+                          <TooltipContent side="bottom">
+                            Edit styling
+                          </TooltipContent>
                         </Tooltip>
                       </div>
                     </div>
@@ -1603,17 +1943,22 @@ function SidebarEditor({
         </div>
       </Tabs>
 
-      <Dialog open={!!fieldToDelete} onOpenChange={(open) => !open && setFieldToDelete(null)}>
+      <Dialog
+        open={!!fieldToDelete}
+        onOpenChange={(open) => !open && setFieldToDelete(null)}
+      >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Hapus Field</DialogTitle>
+            <DialogTitle>Delete Field</DialogTitle>
             <DialogDescription>
-              Apakah Anda yakin ingin menghapus field <strong>{fieldToDelete?.label}</strong>? Tindakan ini tidak dapat dibatalkan.
+              Are you sure you want to delete field{" "}
+              <strong>{fieldToDelete?.label}</strong>? This action cannot be
+              undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setFieldToDelete(null)}>
-              Batal
+              Cancel
             </Button>
             <Button
               variant="destructive"
@@ -1624,7 +1969,7 @@ function SidebarEditor({
                 }
               }}
             >
-              Hapus
+              Delete
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1649,6 +1994,7 @@ function PreviewField({
   onResizeStart,
   onMove,
   onValueChange,
+  onImageChange,
   onResize,
   fields,
 }: {
@@ -1667,24 +2013,25 @@ function PreviewField({
   onResizeStart: () => void;
   onMove: (x: number, y: number) => void;
   onValueChange: (value: string) => void;
+  onImageChange: (
+    patch: Pick<CertificateField, "imageDataUrl" | "imageMimeType" | "value">,
+  ) => void;
   onResize: (width: number, height: number) => void;
   fields: CertificateField[];
 }) {
-  const [activeGuides, setActiveGuides] = useState<{ x?: number; y?: number }>({});
-  if (!field.visible || !pageSize || !previewSize) {
-    return null;
-  }
-
-  const left = (field.x / pageSize.width) * previewSize.width;
-  const yOffset = field.type === "image" ? field.height : field.fontSize;
-  const top = ((pageSize.height - field.y - yOffset) / pageSize.height) * previewSize.height;
-  const width = (field.width / pageSize.width) * previewSize.width;
-  const height = (field.height / pageSize.height) * previewSize.height;
+  const [activeGuides, setActiveGuides] = useState<{ x?: number; y?: number }>(
+    {},
+  );
 
   // Auto Resize Calculation
   const fontSize = useMemo(() => {
+    if (!pageSize || !previewSize) {
+      return field.fontSize;
+    }
+
     const baseSize = (field.fontSize / pageSize.height) * previewSize.height;
-    if (!field.autoResize || field.type !== "text" || !field.width) return baseSize;
+    if (!field.autoResize || field.type !== "text" || !field.width)
+      return baseSize;
 
     const canvas = document.createElement("canvas");
     const context = canvas.getContext("2d");
@@ -1692,16 +2039,24 @@ function PreviewField({
 
     const previewFontWeightValue = previewFontWeight[field.fontWeight];
     const previewWidth = (field.width / pageSize.width) * previewSize.width;
-    const minSize = ((field.minFontSize ?? 8) / pageSize.height) * previewSize.height;
-    
+    const minSize =
+      ((field.minFontSize ?? 8) / pageSize.height) * previewSize.height;
+
     let currentSize = baseSize;
     const lines = (field.value || field.label).split("\n");
     const getLongestLineWidth = (size: number) => {
       context.font = `${previewFontWeightValue} ${size}px ${getFontStack(field.fontFamily)}`;
-      return Math.max(...lines.map(line => {
-        const metrics = context.measureText(line);
-        return metrics.width + (line.length - 1) * ((field.letterSpacing ?? 0) / pageSize.width) * previewSize.width;
-      }));
+      return Math.max(
+        ...lines.map((line) => {
+          const metrics = context.measureText(line);
+          return (
+            metrics.width +
+            (line.length - 1) *
+              ((field.letterSpacing ?? 0) / pageSize.width) *
+              previewSize.width
+          );
+        }),
+      );
     };
 
     let currentMaxWidth = getLongestLineWidth(currentSize);
@@ -1711,7 +2066,32 @@ function PreviewField({
     }
 
     return currentSize;
-  }, [field.fontSize, field.autoResize, field.width, field.value, field.label, field.fontFamily, field.fontWeight, field.letterSpacing, field.minFontSize, pageSize, previewSize]);
+  }, [
+    field.fontSize,
+    field.autoResize,
+    field.type,
+    field.width,
+    field.value,
+    field.label,
+    field.fontFamily,
+    field.fontWeight,
+    field.letterSpacing,
+    field.minFontSize,
+    pageSize,
+    previewSize,
+  ]);
+
+  if (!field.visible || !pageSize || !previewSize) {
+    return null;
+  }
+
+  const left = (field.x / pageSize.width) * previewSize.width;
+  const yOffset = field.type === "image" ? field.height : field.fontSize;
+  const top =
+    ((pageSize.height - field.y - yOffset) / pageSize.height) *
+    previewSize.height;
+  const width = (field.width / pageSize.width) * previewSize.width;
+  const height = (field.height / pageSize.height) * previewSize.height;
 
   function handlePointerDown(event: React.PointerEvent<HTMLButtonElement>) {
     if (!pageSize || !previewSize) {
@@ -1739,13 +2119,16 @@ function PreviewField({
     const offsetY = (event.clientY - targetRect.top) / canvasZoom;
 
     function handlePointerMove(moveEvent: PointerEvent) {
-      const nextLeft = (moveEvent.clientX - parentRect.left) / canvasZoom - offsetX;
-      const nextTop = (moveEvent.clientY - parentRect.top) / canvasZoom - offsetY;
+      const nextLeft =
+        (moveEvent.clientX - parentRect.left) / canvasZoom - offsetX;
+      const nextTop =
+        (moveEvent.clientY - parentRect.top) / canvasZoom - offsetY;
       const maxLeft = currentPreviewSize.width - width;
       const maxTop = currentPreviewSize.height - height;
       const clampedLeft = Math.min(Math.max(0, nextLeft), Math.max(0, maxLeft));
       const clampedTop = Math.min(Math.max(0, nextTop), Math.max(0, maxTop));
-      const nextX = (clampedLeft / currentPreviewSize.width) * currentPageSize.width;
+      const nextX =
+        (clampedLeft / currentPreviewSize.width) * currentPageSize.width;
       const nextY =
         currentPageSize.height -
         (clampedTop / currentPreviewSize.height) * currentPageSize.height -
@@ -1766,30 +2149,56 @@ function PreviewField({
       // Snapping candidates
       const xTargets = [
         { val: 0, guide: 0 },
-        { val: currentPageSize.width / 2 - field.width / 2, guide: currentPageSize.width / 2 },
-        { val: currentPageSize.width - field.width, guide: currentPageSize.width },
+        {
+          val: currentPageSize.width / 2 - field.width / 2,
+          guide: currentPageSize.width / 2,
+        },
+        {
+          val: currentPageSize.width - field.width,
+          guide: currentPageSize.width,
+        },
       ];
 
       const yTargets = [
         { val: 0, guide: 0 },
-        { val: currentPageSize.height / 2 - yOffset / 2, guide: currentPageSize.height / 2 },
-        { val: currentPageSize.height - yOffset, guide: currentPageSize.height },
+        {
+          val: currentPageSize.height / 2 - yOffset / 2,
+          guide: currentPageSize.height / 2,
+        },
+        {
+          val: currentPageSize.height - yOffset,
+          guide: currentPageSize.height,
+        },
       ];
 
       // Add other fields to targets
-      fields.filter(f => f.id !== field.id && f.visible).forEach(f => {
-        const fYOffset = f.type === "image" ? f.height : f.fontSize;
-        
-        // X Snapping
-        xTargets.push({ val: f.x, guide: f.x });
-        xTargets.push({ val: f.x + f.width - field.width, guide: f.x + f.width });
-        xTargets.push({ val: f.x + f.width / 2 - field.width / 2, guide: f.x + f.width / 2 });
-        
-        // Y Snapping
-        yTargets.push({ val: f.y, guide: f.y });
-        yTargets.push({ val: f.y + fYOffset - yOffset, guide: f.y + fYOffset });
-        yTargets.push({ val: f.y + fYOffset / 2 - yOffset / 2, guide: f.y + fYOffset / 2 });
-      });
+      fields
+        .filter((f) => f.id !== field.id && f.visible)
+        .forEach((f) => {
+          const fYOffset = f.type === "image" ? f.height : f.fontSize;
+
+          // X Snapping
+          xTargets.push({ val: f.x, guide: f.x });
+          xTargets.push({
+            val: f.x + f.width - field.width,
+            guide: f.x + f.width,
+          });
+          xTargets.push({
+            val: f.x + f.width / 2 - field.width / 2,
+            guide: f.x + f.width / 2,
+          });
+
+          // Y Snapping
+          yTargets.push({ val: f.y, guide: f.y });
+          yTargets.push({
+            val: f.y + fYOffset - yOffset,
+            guide: f.y + fYOffset,
+          });
+          yTargets.push({
+            val: f.y + fYOffset / 2 - yOffset / 2,
+            guide: f.y + fYOffset / 2,
+          });
+        });
 
       for (const target of xTargets) {
         if (Math.abs(nextX - target.val) < SNAP_THRESHOLD) {
@@ -1841,23 +2250,31 @@ function PreviewField({
     const startWidth = width;
     const startHeight = height;
     const minWidth = field.type === "image" ? 24 : Math.max(40, fontSize * 2);
-    const minHeight = field.type === "image" ? 24 : Math.max(18, fontSize * 1.15);
+    const minHeight =
+      field.type === "image" ? 24 : Math.max(18, fontSize * 1.15);
     const maxWidth = currentPreviewSize.width - left;
     const maxHeight = currentPreviewSize.height - top;
 
     function handlePointerMove(moveEvent: PointerEvent) {
       const nextPreviewWidth = Math.min(
-        Math.max(minWidth, startWidth + (moveEvent.clientX - startClientX) / canvasZoom),
+        Math.max(
+          minWidth,
+          startWidth + (moveEvent.clientX - startClientX) / canvasZoom,
+        ),
         maxWidth,
       );
       const nextPreviewHeight = Math.min(
-        Math.max(minHeight, startHeight + (moveEvent.clientY - startClientY) / canvasZoom),
+        Math.max(
+          minHeight,
+          startHeight + (moveEvent.clientY - startClientY) / canvasZoom,
+        ),
         maxHeight,
       );
       const nextWidth =
         (nextPreviewWidth / currentPreviewSize.width) * currentPageSize.width;
       const nextHeight =
-        (nextPreviewHeight / currentPreviewSize.height) * currentPageSize.height;
+        (nextPreviewHeight / currentPreviewSize.height) *
+        currentPageSize.height;
 
       onResize(Math.round(nextWidth), Math.round(nextHeight));
     }
@@ -1891,12 +2308,18 @@ function PreviewField({
         color: field.color,
         textAlign: field.alignment,
         lineHeight: field.lineHeight ?? 1.25,
-        letterSpacing: field.letterSpacing ? `${field.letterSpacing}px` : "normal",
+        letterSpacing: field.letterSpacing
+          ? `${field.letterSpacing}px`
+          : "normal",
         opacity: field.opacity ?? 1,
         transform: field.rotate ? `rotate(${field.rotate}deg)` : "none",
         textTransform: field.textTransform ?? "none",
         textShadow: field.shadowColor
-          ? `${field.shadowOffsetX ?? 2}px ${field.shadowOffsetY ?? 2}px 0px ${field.shadowColor}${Math.round((field.shadowOpacity ?? 0.5) * 255).toString(16).padStart(2, "0")}`
+          ? `${field.shadowOffsetX ?? 2}px ${field.shadowOffsetY ?? 2}px 0px ${field.shadowColor}${Math.round(
+              (field.shadowOpacity ?? 0.5) * 255,
+            )
+              .toString(16)
+              .padStart(2, "0")}`
           : "none",
         whiteSpace: "pre-wrap",
         wordBreak: "break-word",
@@ -1922,7 +2345,9 @@ function PreviewField({
             fontSize,
             textAlign: field.alignment,
             lineHeight: field.lineHeight ?? 1.25,
-            letterSpacing: field.letterSpacing ? `${field.letterSpacing}px` : "normal",
+            letterSpacing: field.letterSpacing
+              ? `${field.letterSpacing}px`
+              : "normal",
             opacity: field.opacity ?? 1,
             textTransform: field.textTransform ?? "none",
             fontStyle: field.fontStyle ?? "normal",
@@ -1948,7 +2373,7 @@ function PreviewField({
             draggable={false}
           />
         ) : (
-          <div 
+          <div
             className="flex h-full flex-col items-center justify-center gap-1 text-[10px] text-muted-foreground"
             onDragOver={(e) => {
               e.preventDefault();
@@ -1958,9 +2383,11 @@ function PreviewField({
               e.preventDefault();
               e.stopPropagation();
               const file = e.dataTransfer.files[0];
-              if (file && (file.type.startsWith("image/"))) {
-                const isPng = file.type === "image/png" || file.name.toLowerCase().endsWith(".png");
-                onUpdateField(field.id, {
+              if (file && file.type.startsWith("image/")) {
+                const isPng =
+                  file.type === "image/png" ||
+                  file.name.toLowerCase().endsWith(".png");
+                onImageChange({
                   imageDataUrl: await fileToDataUrl(file),
                   imageMimeType: isPng ? "image/png" : "image/jpeg",
                   value: file.name,
@@ -1976,11 +2403,26 @@ function PreviewField({
         <div
           className="h-full w-full"
           style={{
-            backgroundColor: field.shapeType === "line" ? "transparent" : field.fillColor,
-            border: field.strokeWidth && field.strokeColor && field.shapeType !== "line" ? `${(field.strokeWidth / pageSize.height) * previewSize.height}px solid ${field.strokeColor}` : "none",
-            borderRadius: field.shapeType === "circle" ? "50%" : `${((field.borderRadius ?? 0) / pageSize.height) * previewSize.height}px`,
-            height: field.shapeType === "line" ? `${((field.strokeWidth ?? 2) / pageSize.height) * previewSize.height}px` : "100%",
-            borderTop: field.shapeType === "line" && field.strokeColor ? `${((field.strokeWidth ?? 2) / pageSize.height) * previewSize.height}px solid ${field.strokeColor}` : undefined,
+            backgroundColor:
+              field.shapeType === "line" ? "transparent" : field.fillColor,
+            border:
+              field.strokeWidth &&
+              field.strokeColor &&
+              field.shapeType !== "line"
+                ? `${(field.strokeWidth / pageSize.height) * previewSize.height}px solid ${field.strokeColor}`
+                : "none",
+            borderRadius:
+              field.shapeType === "circle"
+                ? "50%"
+                : `${((field.borderRadius ?? 0) / pageSize.height) * previewSize.height}px`,
+            height:
+              field.shapeType === "line"
+                ? `${((field.strokeWidth ?? 2) / pageSize.height) * previewSize.height}px`
+                : "100%",
+            borderTop:
+              field.shapeType === "line" && field.strokeColor
+                ? `${((field.strokeWidth ?? 2) / pageSize.height) * previewSize.height}px solid ${field.strokeColor}`
+                : undefined,
           }}
         />
       ) : (
@@ -1992,7 +2434,9 @@ function PreviewField({
             fontSize,
             textAlign: field.alignment,
             lineHeight: field.lineHeight ?? 1.25,
-            letterSpacing: field.letterSpacing ? `${field.letterSpacing}px` : "normal",
+            letterSpacing: field.letterSpacing
+              ? `${field.letterSpacing}px`
+              : "normal",
             opacity: field.opacity ?? 1,
             textTransform: field.textTransform ?? "none",
             fontStyle: field.fontStyle ?? "normal",
@@ -2005,10 +2449,14 @@ function PreviewField({
       {selected ? (
         <>
           <div className="absolute -top-7 left-0 z-50 flex h-6 w-max whitespace-nowrap items-center gap-2 rounded-full bg-zinc-900 px-2.5 py-1 text-[10px] font-bold font-sans text-white shadow-xl ring-1 ring-white/10 transition-all duration-300">
-            <span className="text-[9px] font-black text-zinc-500 uppercase tracking-tighter">W</span>
+            <span className="text-[9px] font-black text-zinc-500 uppercase tracking-tighter">
+              W
+            </span>
             <span className="tabular-nums">{Math.round(field.width)}</span>
             <div className="mx-0.5 h-2 w-px bg-white/20" />
-            <span className="text-[9px] font-black text-zinc-500 uppercase tracking-tighter">H</span>
+            <span className="text-[9px] font-black text-zinc-500 uppercase tracking-tighter">
+              H
+            </span>
             <span className="tabular-nums">{Math.round(field.height)}</span>
           </div>
           <span
@@ -2018,10 +2466,10 @@ function PreviewField({
           />
         </>
       ) : null}
-      
+
       {/* Visual Guidelines */}
       {dragging && activeGuides.x !== undefined && (
-        <div 
+        <div
           className="pointer-events-none absolute border-l border-sky-500/50 shadow-[0_0_8px_rgba(14,165,233,0.3)] z-[100]"
           style={{
             left: (activeGuides.x / pageSize.width) * previewSize.width - left,
@@ -2032,11 +2480,14 @@ function PreviewField({
         />
       )}
       {dragging && activeGuides.y !== undefined && (
-        <div 
+        <div
           className="pointer-events-none absolute border-t border-sky-500/50 shadow-[0_0_8px_rgba(14,165,233,0.3)] z-[100]"
           style={{
             left: -left,
-            top: ((pageSize.height - activeGuides.y) / pageSize.height) * previewSize.height - top,
+            top:
+              ((pageSize.height - activeGuides.y) / pageSize.height) *
+                previewSize.height -
+              top,
             width: previewSize.width,
             height: 0,
           }}
@@ -2063,7 +2514,9 @@ function GoogleFontSelect({
       .map((group) => ({
         ...group,
         fonts: normalizedQuery
-          ? group.fonts.filter((font) => font.toLowerCase().includes(normalizedQuery))
+          ? group.fonts.filter((font) =>
+              font.toLowerCase().includes(normalizedQuery),
+            )
           : group.fonts,
       }))
       .filter((group) => group.fonts.length > 0);
@@ -2075,9 +2528,7 @@ function GoogleFontSelect({
   return (
     <div className="relative">
       <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger
-          className="group relative flex w-full items-center gap-0 overflow-hidden rounded-md border text-left transition-colors hover:bg-muted/50 focus-visible:ring-1 focus-visible:ring-primary outline-none"
-        >
+        <PopoverTrigger className="group relative flex w-full items-center gap-0 overflow-hidden rounded-md border text-left transition-colors hover:bg-muted/50 focus-visible:ring-1 focus-visible:ring-primary outline-none">
           <div className="flex h-10 flex-1 items-center px-3 py-2">
             <span
               className="truncate text-sm"
@@ -2108,7 +2559,10 @@ function GoogleFontSelect({
           </div>
           <div className="max-h-64 overflow-auto pr-1">
             {filteredGroups.map((group) => (
-              <div key={`${group.label}-${fontLoadVersion}`} className="mb-3 last:mb-0">
+              <div
+                key={`${group.label}-${fontLoadVersion}`}
+                className="mb-3 last:mb-0"
+              >
                 <p className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                   {group.label}
                 </p>
@@ -2163,7 +2617,8 @@ function ImageUploadInput({
       return;
     }
 
-    const isPng = file.type === "image/png" || file.name.toLowerCase().endsWith(".png");
+    const isPng =
+      file.type === "image/png" || file.name.toLowerCase().endsWith(".png");
     const isJpeg =
       file.type === "image/jpeg" ||
       file.name.toLowerCase().endsWith(".jpg") ||
@@ -2184,7 +2639,9 @@ function ImageUploadInput({
     <div
       className={cn(
         "relative flex h-24 cursor-pointer flex-col items-center justify-center gap-2 rounded-md border border-dashed text-muted-foreground transition-all",
-        isDragOver ? "border-primary bg-primary/5 text-primary" : "hover:border-primary hover:bg-muted/50"
+        isDragOver
+          ? "border-primary bg-primary/5 text-primary"
+          : "hover:border-primary hover:bg-muted/50",
       )}
       onDragOver={(e) => {
         e.preventDefault();
@@ -2198,7 +2655,12 @@ function ImageUploadInput({
       }}
     >
       <div className="flex flex-col items-center gap-1.5 p-4 text-center">
-        <FileUp className={cn("size-5 transition-transform", isDragOver && "scale-110")} />
+        <FileUp
+          className={cn(
+            "size-5 transition-transform",
+            isDragOver && "scale-110",
+          )}
+        />
         <div className="space-y-0.5">
           <p className="text-[10px] font-medium">Drop image here</p>
           <p className="text-[9px] opacity-60">or click to browse (PNG, JPG)</p>
@@ -2234,12 +2696,14 @@ function BulkPanel({
   onRowsChange: (rows: BulkRow[]) => void;
   onPreviewIndexChange: (index: number) => void;
   onFilenameTemplateChange: (value: string) => void;
-  onGenerate: (type: 'pdf' | 'jpg') => void;
+  onGenerate: (type: "pdf" | "jpg") => void;
 }) {
   const [isDragOver, setIsDragOver] = useState(false);
   const textFields = fields.filter((field) => field.type === "text");
   const headers = rows[0] ? Object.keys(rows[0]) : [];
-  const mappedCount = textFields.filter((field) => headers.includes(field.label)).length;
+  const mappedCount = textFields.filter((field) =>
+    headers.includes(field.label),
+  ).length;
   const isUploaded = rows.length > 0;
 
   function handleCsv(file: File | null) {
@@ -2264,7 +2728,10 @@ function BulkPanel({
     setIsDragOver(false);
     const file = event.dataTransfer.files[0];
 
-    if (file?.type === "text/csv" || file?.name.toLowerCase().endsWith(".csv")) {
+    if (
+      file?.type === "text/csv" ||
+      file?.name.toLowerCase().endsWith(".csv")
+    ) {
       handleCsv(file);
     }
   }
@@ -2358,10 +2825,15 @@ function BulkPanel({
 
       {headers.length ? (
         <div className="space-y-2">
-          <Label className="text-xs text-muted-foreground">Detected Headers</Label>
+          <Label className="text-xs text-muted-foreground">
+            Detected Headers
+          </Label>
           <div className="flex flex-wrap gap-1">
             {headers.map((header) => (
-              <span key={header} className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground border">
+              <span
+                key={header}
+                className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground border"
+              >
                 {header}
               </span>
             ))}
@@ -2372,7 +2844,12 @@ function BulkPanel({
       {rows.length ? (
         <>
           <div className="space-y-2">
-            <Label htmlFor="bulk-preview-row" className="text-xs text-muted-foreground">Preview Row</Label>
+            <Label
+              htmlFor="bulk-preview-row"
+              className="text-xs text-muted-foreground"
+            >
+              Preview Row
+            </Label>
             <div className="flex items-center gap-1.5">
               <Button
                 type="button"
@@ -2394,7 +2871,9 @@ function BulkPanel({
                 onChange={(e) => {
                   const val = parseInt(e.target.value, 10);
                   if (!isNaN(val)) {
-                    onPreviewIndexChange(Math.min(Math.max(0, val - 1), rows.length - 1));
+                    onPreviewIndexChange(
+                      Math.min(Math.max(0, val - 1), rows.length - 1),
+                    );
                   }
                 }}
               />
@@ -2412,7 +2891,12 @@ function BulkPanel({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="bulk-filename" className="text-xs text-muted-foreground">Filename Pattern</Label>
+            <Label
+              htmlFor="bulk-filename"
+              className="text-xs text-muted-foreground"
+            >
+              Filename Pattern
+            </Label>
             <Input
               id="bulk-filename"
               value={filenameTemplate}
@@ -2425,11 +2909,21 @@ function BulkPanel({
           </div>
 
           <div className="grid gap-2">
-            <Button variant="outline" className="w-full" onClick={() => onGenerate('pdf')} disabled={isGenerating}>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => onGenerate("pdf")}
+              disabled={isGenerating}
+            >
               <FileText className="size-4" />
               {isGenerating ? "ZIP..." : "Download as PDF"}
             </Button>
-            <Button variant="outline" className="w-full" onClick={() => onGenerate('jpg')} disabled={isGenerating}>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => onGenerate("jpg")}
+              disabled={isGenerating}
+            >
               <ImageIcon className="size-4" />
               {isGenerating ? "ZIP..." : "Download as JPG"}
             </Button>
@@ -2453,7 +2947,9 @@ function FieldSettings({
   return (
     <section className="space-y-5">
       <div className="grid gap-2">
-        <Label htmlFor="field-label" className="text-xs text-muted-foreground">Label</Label>
+        <Label htmlFor="field-label" className="text-xs text-muted-foreground">
+          Label
+        </Label>
         <Input
           id="field-label"
           value={field.label}
@@ -2464,7 +2960,12 @@ function FieldSettings({
 
       {field.type === "image" ? (
         <div className="grid gap-2">
-          <Label htmlFor="field-image" className="text-xs text-muted-foreground">Image</Label>
+          <Label
+            htmlFor="field-image"
+            className="text-xs text-muted-foreground"
+          >
+            Image
+          </Label>
           <ImageUploadInput id="field-image" onChange={onChange} />
           {field.imageDataUrl && (
             <div className="rounded-md border bg-muted/20 p-2 transition-colors">
@@ -2481,7 +2982,9 @@ function FieldSettings({
         <div className="grid grid-cols-2 gap-4">
           <div className="grid gap-2">
             <div className="flex items-center justify-between">
-              <Label className="text-xs text-muted-foreground">Fill Color</Label>
+              <Label className="text-xs text-muted-foreground">
+                Fill Color
+              </Label>
               {field.fillColor && (
                 <button
                   className="text-[10px] text-muted-foreground hover:text-destructive transition-colors"
@@ -2499,12 +3002,22 @@ function FieldSettings({
                       type="color"
                       value={field.fillColor}
                       className="absolute inset-0 h-full w-full cursor-pointer border-none bg-transparent p-0 opacity-0"
-                      onChange={(event) => onChange({ fillColor: event.target.value })}
+                      onChange={(event) =>
+                        onChange({ fillColor: event.target.value })
+                      }
                       disabled={field.shapeType === "line"}
                     />
                     <div
-                      className={cn("h-full w-full", field.shapeType === "line" && "bg-zinc-200 opacity-50")}
-                      style={{ backgroundColor: field.shapeType === "line" ? undefined : field.fillColor }}
+                      className={cn(
+                        "h-full w-full",
+                        field.shapeType === "line" && "bg-zinc-200 opacity-50",
+                      )}
+                      style={{
+                        backgroundColor:
+                          field.shapeType === "line"
+                            ? undefined
+                            : field.fillColor,
+                      }}
                     />
                   </>
                 ) : (
@@ -2520,7 +3033,9 @@ function FieldSettings({
           </div>
           <div className="grid gap-2">
             <div className="flex items-center justify-between">
-              <Label className="text-xs text-muted-foreground">Stroke Color</Label>
+              <Label className="text-xs text-muted-foreground">
+                Stroke Color
+              </Label>
               {field.strokeColor && (
                 <button
                   className="text-[10px] text-muted-foreground hover:text-destructive transition-colors"
@@ -2538,7 +3053,9 @@ function FieldSettings({
                       type="color"
                       value={field.strokeColor}
                       className="absolute inset-0 h-full w-full cursor-pointer border-none bg-transparent p-0 opacity-0"
-                      onChange={(event) => onChange({ strokeColor: event.target.value })}
+                      onChange={(event) =>
+                        onChange({ strokeColor: event.target.value })
+                      }
                     />
                     <div
                       className="h-full w-full"
@@ -2559,34 +3076,65 @@ function FieldSettings({
         </div>
       ) : (
         <div className="grid gap-2">
-          <Label htmlFor="field-value" className="text-xs text-muted-foreground">Content</Label>
+          <Label
+            htmlFor="field-value"
+            className="text-xs text-muted-foreground"
+          >
+            Content
+          </Label>
           <Textarea
             id="field-value"
             value={field.value}
             className="min-h-20 text-xs resize-none"
-            placeholder="Ketik konten di sini... (Shift+Enter untuk baris baru)"
+            placeholder="Type content here... (Shift+Enter for a new line)"
             onChange={(event) => onChange({ value: event.target.value })}
           />
         </div>
       )}
 
       <div className="grid grid-cols-2 gap-x-3 gap-y-2">
-        <NumberInput label="X" value={field.x} onChange={(x) => onChange({ x })} />
-        <NumberInput label="Y" value={field.y} onChange={(y) => onChange({ y })} />
-        <NumberInput label="W" value={field.width} onChange={(width) => onChange({ width })} />
-        <NumberInput label="H" value={field.height} onChange={(height) => onChange({ height })} />
+        <NumberInput
+          label="X"
+          value={field.x}
+          onChange={(x) => onChange({ x })}
+        />
+        <NumberInput
+          label="Y"
+          value={field.y}
+          onChange={(y) => onChange({ y })}
+        />
+        <NumberInput
+          label="W"
+          value={field.width}
+          onChange={(width) => onChange({ width })}
+        />
+        <NumberInput
+          label="H"
+          value={field.height}
+          onChange={(height) => onChange({ height })}
+        />
       </div>
 
       {field.type === "shape" && (
         <div className="grid grid-cols-2 gap-4">
           <div className="grid gap-2">
-            <Label className="text-xs text-muted-foreground">Stroke Width</Label>
-            <NumberInput label="Px" value={field.strokeWidth ?? 1} onChange={(val) => onChange({ strokeWidth: val })} />
+            <Label className="text-xs text-muted-foreground">
+              Stroke Width
+            </Label>
+            <NumberInput
+              label="Px"
+              value={field.strokeWidth ?? 1}
+              onChange={(val) => onChange({ strokeWidth: val })}
+            />
           </div>
           {field.shapeType === "rectangle" && (
             <div className="grid gap-2">
               <Label className="text-xs text-muted-foreground">Radius</Label>
-              <NumberInput label="Px" value={field.borderRadius ?? 0} onChange={(val) => onChange({ borderRadius: val })} />
+              <NumberInput
+                label="Px"
+                value={field.borderRadius ?? 0}
+                onChange={(val) => onChange({ borderRadius: val })}
+              />
             </div>
           )}
         </div>
@@ -2594,7 +3142,6 @@ function FieldSettings({
 
       {field.type === "text" && (
         <div className="space-y-4 pt-2">
-
           <Separator className="opacity-50" />
 
           <div className="grid gap-4">
@@ -2617,17 +3164,25 @@ function FieldSettings({
                     type="number"
                     value={Math.round(field.fontSize)}
                     className="h-8 w-full bg-background px-2 text-xs font-medium text-foreground outline-none transition-colors [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                    onChange={(e) => onChange({ fontSize: Number(e.target.value) })}
+                    onChange={(e) =>
+                      onChange({ fontSize: Number(e.target.value) })
+                    }
                   />
                   <DropdownMenu>
                     <DropdownMenuTrigger className="flex h-8 w-7 shrink-0 items-center justify-center border-l bg-muted/30 hover:bg-muted transition-colors">
                       <ChevronDown className="size-3 text-muted-foreground" />
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-20 min-w-0">
-                      {[10, 11, 12, 13, 14, 15, 16, 20, 24, 32, 36, 40, 48, 64, 96, 128].map((size) => (
+                      {[
+                        10, 11, 12, 13, 14, 15, 16, 20, 24, 32, 36, 40, 48, 64,
+                        96, 128,
+                      ].map((size) => (
                         <DropdownMenuItem
                           key={size}
-                          className={cn("text-xs", field.fontSize === size && "bg-accent font-bold")}
+                          className={cn(
+                            "text-xs",
+                            field.fontSize === size && "bg-accent font-bold",
+                          )}
                           onClick={() => onChange({ fontSize: size })}
                         >
                           {size}
@@ -2646,16 +3201,22 @@ function FieldSettings({
                       id="field-color-hex"
                       value={field.color}
                       className="h-8 pl-5 text-[11px] font-mono uppercase"
-                      onChange={(event) => onChange({ color: event.target.value })}
+                      onChange={(event) =>
+                        onChange({ color: event.target.value })
+                      }
                     />
-                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">#</span>
+                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">
+                      #
+                    </span>
                   </div>
                   <div className="relative h-8 w-10 shrink-0 overflow-hidden rounded-md border shadow-sm transition-colors hover:border-primary">
                     <Input
                       type="color"
                       value={field.color}
                       className="absolute inset-0 h-full w-full cursor-pointer border-none bg-transparent p-0 opacity-0"
-                      onChange={(event) => onChange({ color: event.target.value })}
+                      onChange={(event) =>
+                        onChange({ color: event.target.value })
+                      }
                     />
                     <div
                       className="h-full w-full"
@@ -2668,11 +3229,14 @@ function FieldSettings({
 
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="field-font-weight" className="text-xs text-muted-foreground">Weight</Label>
+                <Label
+                  htmlFor="field-font-weight"
+                  className="text-xs text-muted-foreground"
+                >
+                  Weight
+                </Label>
                 <DropdownMenu>
-                  <DropdownMenuTrigger
-                    className="group relative flex w-full items-center gap-0 overflow-hidden rounded-md border text-left transition-colors hover:bg-muted/50 focus-visible:ring-1 focus-visible:ring-primary outline-none"
-                  >
+                  <DropdownMenuTrigger className="group relative flex w-full items-center gap-0 overflow-hidden rounded-md border text-left transition-colors hover:bg-muted/50 focus-visible:ring-1 focus-visible:ring-primary outline-none">
                     <div className="flex h-8 flex-1 items-center px-2.5 text-xs font-medium text-foreground">
                       <span className="capitalize">{field.fontWeight}</span>
                     </div>
@@ -2681,21 +3245,29 @@ function FieldSettings({
                     </div>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-32 min-w-0">
-                    {(["regular", "medium", "semibold", "bold"] as const).map((weight) => (
-                      <DropdownMenuItem
-                        key={weight}
-                        className={cn("text-xs capitalize", field.fontWeight === weight && "bg-accent font-bold")}
-                        onClick={() => onChange({ fontWeight: weight })}
-                      >
-                        {weight}
-                      </DropdownMenuItem>
-                    ))}
+                    {(["regular", "medium", "semibold", "bold"] as const).map(
+                      (weight) => (
+                        <DropdownMenuItem
+                          key={weight}
+                          className={cn(
+                            "text-xs capitalize",
+                            field.fontWeight === weight &&
+                              "bg-accent font-bold",
+                          )}
+                          onClick={() => onChange({ fontWeight: weight })}
+                        >
+                          {weight}
+                        </DropdownMenuItem>
+                      ),
+                    )}
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
 
               <div className="grid gap-2">
-                <Label className="text-xs text-muted-foreground">Alignment</Label>
+                <Label className="text-xs text-muted-foreground">
+                  Alignment
+                </Label>
                 <div className="grid grid-cols-3 gap-1 rounded-md bg-muted/50 p-1">
                   {[
                     ["left", AlignLeft],
@@ -2707,10 +3279,14 @@ function FieldSettings({
                       type="button"
                       className={cn(
                         "flex items-center justify-center rounded px-1 py-1.5 transition-all",
-                        field.alignment === value ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                        field.alignment === value
+                          ? "bg-background text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground",
                       )}
                       onClick={() =>
-                        onChange({ alignment: value as CertificateFieldAlignment })
+                        onChange({
+                          alignment: value as CertificateFieldAlignment,
+                        })
                       }
                     >
                       <Icon className="size-3.5" />
@@ -2721,20 +3297,64 @@ function FieldSettings({
             </div>
 
             <div className="grid gap-2">
-              <Label className="text-xs text-muted-foreground">Text Effects</Label>
+              <Label className="text-xs text-muted-foreground">
+                Text Effects
+              </Label>
               <div className="flex gap-1 rounded-md bg-muted/50 p-1">
                 {[
-                  { id: "bold", icon: Bold, active: field.fontWeight === "bold", onClick: () => onChange({ fontWeight: field.fontWeight === "bold" ? "regular" : "bold" }) },
-                  { id: "italic", icon: Italic, active: field.fontStyle === "italic", onClick: () => onChange({ fontStyle: field.fontStyle === "italic" ? "normal" : "italic" }) },
-                  { id: "underline", icon: Underline, active: field.textDecoration === "underline", onClick: () => onChange({ textDecoration: field.textDecoration === "underline" ? "none" : "underline" }) },
-                  { id: "strikethrough", icon: Strikethrough, active: field.textDecoration === "line-through", onClick: () => onChange({ textDecoration: field.textDecoration === "line-through" ? "none" : "line-through" }) },
+                  {
+                    id: "bold",
+                    icon: Bold,
+                    active: field.fontWeight === "bold",
+                    onClick: () =>
+                      onChange({
+                        fontWeight:
+                          field.fontWeight === "bold" ? "regular" : "bold",
+                      }),
+                  },
+                  {
+                    id: "italic",
+                    icon: Italic,
+                    active: field.fontStyle === "italic",
+                    onClick: () =>
+                      onChange({
+                        fontStyle:
+                          field.fontStyle === "italic" ? "normal" : "italic",
+                      }),
+                  },
+                  {
+                    id: "underline",
+                    icon: Underline,
+                    active: field.textDecoration === "underline",
+                    onClick: () =>
+                      onChange({
+                        textDecoration:
+                          field.textDecoration === "underline"
+                            ? "none"
+                            : "underline",
+                      }),
+                  },
+                  {
+                    id: "strikethrough",
+                    icon: Strikethrough,
+                    active: field.textDecoration === "line-through",
+                    onClick: () =>
+                      onChange({
+                        textDecoration:
+                          field.textDecoration === "line-through"
+                            ? "none"
+                            : "line-through",
+                      }),
+                  },
                 ].map((item) => (
                   <button
                     key={item.id}
                     type="button"
                     className={cn(
                       "flex flex-1 items-center justify-center rounded py-1.5 transition-all",
-                      item.active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                      item.active
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground",
                     )}
                     onClick={item.onClick}
                   >
@@ -2745,25 +3365,37 @@ function FieldSettings({
             </div>
 
             <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label className="text-xs text-muted-foreground">Auto Resize</Label>
-                  <div className="flex h-8 items-center justify-between rounded-md border bg-muted/20 px-2.5">
-                    <span className="text-[10px] font-medium text-muted-foreground">{field.autoResize ? "On" : "Off"}</span>
-                    <Switch
-                      checked={field.autoResize ?? false}
-                      onCheckedChange={(checked) => onChange({ autoResize: checked })}
-                      className="scale-75 origin-right"
-                    />
-                  </div>
+              <div className="grid gap-2">
+                <Label className="text-xs text-muted-foreground">
+                  Auto Resize
+                </Label>
+                <div className="flex h-8 items-center justify-between rounded-md border bg-muted/20 px-2.5">
+                  <span className="text-[10px] font-medium text-muted-foreground">
+                    {field.autoResize ? "On" : "Off"}
+                  </span>
+                  <Switch
+                    checked={field.autoResize ?? false}
+                    onCheckedChange={(checked) =>
+                      onChange({ autoResize: checked })
+                    }
+                    className="scale-75 origin-right"
+                  />
                 </div>
-
-                {field.autoResize && (
-                  <div className="grid gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
-                    <Label className="text-xs text-muted-foreground">Min Size</Label>
-                    <NumberInput label="Px" value={field.minFontSize ?? 8} onChange={(val) => onChange({ minFontSize: val })} />
-                  </div>
-                )}
               </div>
+
+              {field.autoResize && (
+                <div className="grid gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <Label className="text-xs text-muted-foreground">
+                    Min Size
+                  </Label>
+                  <NumberInput
+                    label="Px"
+                    value={field.minFontSize ?? 8}
+                    onChange={(val) => onChange({ minFontSize: val })}
+                  />
+                </div>
+              )}
+            </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
@@ -2776,14 +3408,20 @@ function FieldSettings({
                     step="0.1"
                     value={field.opacity ?? 1}
                     className="h-4 flex-1 cursor-pointer accent-primary"
-                    onChange={(e) => onChange({ opacity: Number(e.target.value) })}
+                    onChange={(e) =>
+                      onChange({ opacity: Number(e.target.value) })
+                    }
                   />
-                  <span className="w-8 text-[10px] font-mono">{(field.opacity ?? 1).toFixed(1)}</span>
+                  <span className="w-8 text-[10px] font-mono">
+                    {(field.opacity ?? 1).toFixed(1)}
+                  </span>
                 </div>
               </div>
 
               <div className="grid gap-2">
-                <Label className="text-xs text-muted-foreground">Rotation</Label>
+                <Label className="text-xs text-muted-foreground">
+                  Rotation
+                </Label>
                 <div className="group relative flex items-center gap-0 overflow-hidden rounded-md border transition-colors focus-within:border-primary">
                   <div className="flex h-8 w-7 shrink-0 items-center justify-center border-r bg-muted text-[10px] font-bold text-muted-foreground select-none group-focus-within:text-foreground transition-colors">
                     <RotateCw className="size-3" />
@@ -2792,26 +3430,44 @@ function FieldSettings({
                     type="number"
                     value={field.rotate ?? 0}
                     className="h-8 w-full bg-background px-2 text-xs font-medium text-foreground outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none transition-colors"
-                    onChange={(e) => onChange({ rotate: Number(e.target.value) })}
+                    onChange={(e) =>
+                      onChange({ rotate: Number(e.target.value) })
+                    }
                   />
-                  <div className="flex h-8 w-6 shrink-0 items-center justify-center text-[10px] text-muted-foreground">°</div>
+                  <div className="flex h-8 w-6 shrink-0 items-center justify-center text-[10px] text-muted-foreground">
+                    °
+                  </div>
                 </div>
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label className="text-xs text-muted-foreground">Letter Spacing</Label>
-                <NumberInput label="Px" value={field.letterSpacing ?? 0} onChange={(val) => onChange({ letterSpacing: val })} />
+                <Label className="text-xs text-muted-foreground">
+                  Letter Spacing
+                </Label>
+                <NumberInput
+                  label="Px"
+                  value={field.letterSpacing ?? 0}
+                  onChange={(val) => onChange({ letterSpacing: val })}
+                />
               </div>
               <div className="grid gap-2">
-                <Label className="text-xs text-muted-foreground">Line Height</Label>
-                <NumberInput label="Em" value={field.lineHeight ?? 1.25} onChange={(val) => onChange({ lineHeight: val })} />
+                <Label className="text-xs text-muted-foreground">
+                  Line Height
+                </Label>
+                <NumberInput
+                  label="Em"
+                  value={field.lineHeight ?? 1.25}
+                  onChange={(val) => onChange({ lineHeight: val })}
+                />
               </div>
             </div>
 
             <div className="grid gap-2">
-              <Label className="text-xs text-muted-foreground">Text Transform</Label>
+              <Label className="text-xs text-muted-foreground">
+                Text Transform
+              </Label>
               <div className="grid grid-cols-4 gap-1 rounded-md bg-muted/50 p-1">
                 {[
                   { value: "none", label: "Ab", title: "None" },
@@ -2828,17 +3484,26 @@ function FieldSettings({
                             "flex h-7 items-center justify-center rounded px-1 transition-all",
                             (field.textTransform ?? "none") === item.value
                               ? "bg-background text-foreground shadow-sm font-bold"
-                              : "text-muted-foreground hover:text-foreground"
+                              : "text-muted-foreground hover:text-foreground",
                           )}
-                          onClick={() => onChange({ textTransform: item.value as any })}
+                          onClick={() =>
+                            onChange({
+                              textTransform:
+                                item.value as CertificateField["textTransform"],
+                            })
+                          }
                         >
-                          <span className="text-[11px] font-medium">{item.label}</span>
+                          <span className="text-[11px] font-medium">
+                            {item.label}
+                          </span>
                         </button>
                       }
                     >
                       {item.title}
                     </TooltipTrigger>
-                    <TooltipContent side="bottom" className="text-[10px]">{item.title}</TooltipContent>
+                    <TooltipContent side="bottom" className="text-[10px]">
+                      {item.title}
+                    </TooltipContent>
                   </Tooltip>
                 ))}
               </div>
@@ -2851,48 +3516,75 @@ function FieldSettings({
                 <Label className="text-xs font-semibold">Shadow</Label>
                 <Switch
                   checked={!!field.shadowColor}
-                  onCheckedChange={(checked) => onChange({ shadowColor: checked ? "#000000" : "" })}
+                  onCheckedChange={(checked) =>
+                    onChange({ shadowColor: checked ? "#000000" : "" })
+                  }
                 />
               </div>
 
               {field.shadowColor !== undefined && field.shadowColor !== "" && (
                 <div className="space-y-4 rounded-md border bg-muted/20 p-3 animate-in fade-in slide-in-from-top-2">
                   <div className="grid gap-2">
-                    <Label className="text-xs text-muted-foreground">Shadow Color</Label>
+                    <Label className="text-xs text-muted-foreground">
+                      Shadow Color
+                    </Label>
                     <div className="flex gap-2">
                       <div className="relative flex-1">
                         <Input
                           value={field.shadowColor}
                           className="h-8 pl-5 text-[11px] font-mono uppercase"
-                          onChange={(event) => onChange({ shadowColor: event.target.value })}
+                          onChange={(event) =>
+                            onChange({ shadowColor: event.target.value })
+                          }
                         />
-                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">#</span>
+                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">
+                          #
+                        </span>
                       </div>
                       <div className="relative h-8 w-10 shrink-0 overflow-hidden rounded-md border">
                         <Input
                           type="color"
                           value={field.shadowColor}
                           className="absolute inset-0 h-full w-full cursor-pointer border-none bg-transparent p-0 opacity-0"
-                          onChange={(event) => onChange({ shadowColor: event.target.value })}
+                          onChange={(event) =>
+                            onChange({ shadowColor: event.target.value })
+                          }
                         />
-                        <div className="h-full w-full" style={{ backgroundColor: field.shadowColor }} />
+                        <div
+                          className="h-full w-full"
+                          style={{ backgroundColor: field.shadowColor }}
+                        />
                       </div>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <div className="grid gap-2">
-                      <Label className="text-xs text-muted-foreground">Offset X</Label>
-                      <NumberInput label="X" value={field.shadowOffsetX ?? 2} onChange={(val) => onChange({ shadowOffsetX: val })} />
+                      <Label className="text-xs text-muted-foreground">
+                        Offset X
+                      </Label>
+                      <NumberInput
+                        label="X"
+                        value={field.shadowOffsetX ?? 2}
+                        onChange={(val) => onChange({ shadowOffsetX: val })}
+                      />
                     </div>
                     <div className="grid gap-2">
-                      <Label className="text-xs text-muted-foreground">Offset Y</Label>
-                      <NumberInput label="Y" value={field.shadowOffsetY ?? 2} onChange={(val) => onChange({ shadowOffsetY: val })} />
+                      <Label className="text-xs text-muted-foreground">
+                        Offset Y
+                      </Label>
+                      <NumberInput
+                        label="Y"
+                        value={field.shadowOffsetY ?? 2}
+                        onChange={(val) => onChange({ shadowOffsetY: val })}
+                      />
                     </div>
                   </div>
 
                   <div className="grid gap-2">
-                    <Label className="text-xs text-muted-foreground">Shadow Opacity</Label>
+                    <Label className="text-xs text-muted-foreground">
+                      Shadow Opacity
+                    </Label>
                     <div className="flex items-center gap-2">
                       <input
                         type="range"
@@ -2901,20 +3593,21 @@ function FieldSettings({
                         step="0.1"
                         value={field.shadowOpacity ?? 0.5}
                         className="h-4 flex-1 cursor-pointer accent-primary"
-                        onChange={(e) => onChange({ shadowOpacity: Number(e.target.value) })}
+                        onChange={(e) =>
+                          onChange({ shadowOpacity: Number(e.target.value) })
+                        }
                       />
-                      <span className="w-8 text-[10px] font-mono">{(field.shadowOpacity ?? 0.5).toFixed(1)}</span>
+                      <span className="w-8 text-[10px] font-mono">
+                        {(field.shadowOpacity ?? 0.5).toFixed(1)}
+                      </span>
                     </div>
                   </div>
                 </div>
               )}
             </div>
-
           </div>
         </div>
       )}
-
-
     </section>
   );
 }
