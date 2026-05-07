@@ -43,6 +43,7 @@ export type CertificateField = {
   minFontSize?: number;
   fontStyle?: "normal" | "italic";
   textDecoration?: "none" | "underline" | "line-through";
+  locked?: boolean;
 };
 
 export type PdfPageSize = {

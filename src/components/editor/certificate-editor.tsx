@@ -7,9 +7,12 @@ import JSZip from "jszip";
 import {
   Check,
   ChevronDown,
+  ChevronUp,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  ChevronsDown,
+  ChevronsUp,
   Copy,
   Download,
   Eye,
@@ -19,14 +22,17 @@ import {
   FolderOpen,
   GripVertical,
   ImageIcon,
+  Lock,
   Minus,
   MonitorOff,
+  MoreHorizontal,
   Plus,
   RotateCcw,
   Save,
   Search,
   Pencil,
   Trash2,
+  Unlock,
   Moon,
   Sun,
   AlignLeft,
@@ -243,23 +249,42 @@ const defaultField: Omit<CertificateField, "id" | "label"> = {
   borderRadius: 0,
 };
 
-type CanvasPreset = "a4" | "a5" | "f4";
+type CanvasPreset = "a4" | "a5" | "f4" | "custom";
 type CanvasOrientation = "portrait" | "landscape";
+type CanvasUnit = "px" | "mm";
 
-const canvasPresets: Record<
-  CanvasPreset,
-  { label: string; width: number; height: number }
-> = {
+const canvasPresets: Record<CanvasPreset, { label: string; width: number; height: number }> = {
   a4: { label: "A4", width: 595.28, height: 841.89 },
   a5: { label: "A5", width: 419.53, height: 595.28 },
   f4: { label: "F4 / Folio", width: 595.28, height: 935.43 },
+  custom: { label: "Custom", width: 0, height: 0 },
 };
+
+function mmToPdfPoints(value: number) {
+  return (value / 25.4) * 72;
+}
+
+function canvasUnitToPdfPoints(value: number, unit: CanvasUnit) {
+  const safeValue = Math.max(1, value);
+  return unit === "mm" ? mmToPdfPoints(safeValue) : safeValue;
+}
 
 function getCanvasSize(
   preset: CanvasPreset,
   orientation: CanvasOrientation,
+  customSize: { width: number; height: number; unit: CanvasUnit },
 ): PdfPageSize {
-  const size = canvasPresets[preset];
+  const size =
+    preset === "custom"
+      ? {
+          width: canvasUnitToPdfPoints(customSize.width, customSize.unit),
+          height: canvasUnitToPdfPoints(customSize.height, customSize.unit),
+        }
+      : canvasPresets[preset];
+
+  if (preset === "custom") {
+    return size;
+  }
 
   if (orientation === "landscape") {
     return { width: size.height, height: size.width };
@@ -467,6 +492,9 @@ export function CertificateEditor() {
     useState<CanvasPreset>("a4");
   const [blankCanvasOrientation, setBlankCanvasOrientation] =
     useState<CanvasOrientation>("landscape");
+  const [customCanvasWidth, setCustomCanvasWidth] = useState(595);
+  const [customCanvasHeight, setCustomCanvasHeight] = useState(842);
+  const [customCanvasUnit, setCustomCanvasUnit] = useState<CanvasUnit>("px");
   const [isTooSmall, setIsTooSmall] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(0);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -702,6 +730,40 @@ export function CertificateEditor() {
     });
   }
 
+  function moveFieldLayer(
+    id: string,
+    direction: "front" | "back" | "up" | "down",
+  ) {
+    const index = fields.findIndex((field) => field.id === id);
+
+    if (index === -1) {
+      return;
+    }
+
+    let targetIndex = index;
+    if (direction === "front") {
+      targetIndex = 0;
+    } else if (direction === "back") {
+      targetIndex = fields.length - 1;
+    } else if (direction === "up") {
+      targetIndex = Math.max(0, index - 1);
+    } else {
+      targetIndex = Math.min(fields.length - 1, index + 1);
+    }
+
+    if (targetIndex === index) {
+      return;
+    }
+
+    saveHistory();
+    setFields((current) => {
+      const next = current.slice();
+      const [field] = next.splice(index, 1);
+      next.splice(targetIndex, 0, field);
+      return next;
+    });
+  }
+
   function updateField(id: string, patch: Partial<CertificateField>) {
     setFields((current) =>
       current.map((field) =>
@@ -838,7 +900,11 @@ export function CertificateEditor() {
   }
 
   async function createBlankProject() {
-    const size = getCanvasSize(blankCanvasPreset, blankCanvasOrientation);
+    const size = getCanvasSize(blankCanvasPreset, blankCanvasOrientation, {
+      width: customCanvasWidth,
+      height: customCanvasHeight,
+      unit: customCanvasUnit,
+    });
     const pdfDoc = await PDFDocument.create();
     pdfDoc.addPage([size.width, size.height]);
     const bytes = await pdfDoc.save();
@@ -1515,6 +1581,7 @@ export function CertificateEditor() {
               onRemoveField={removeField}
               onDuplicateField={duplicateField}
               onReorderField={reorderField}
+              onMoveLayer={moveFieldLayer}
               onSelectField={setSelectedFieldId}
               onUpdateField={updateField}
               onBulkRowsChange={(rows) => {
@@ -1573,7 +1640,7 @@ export function CertificateEditor() {
                 <Label className="text-xs font-semibold text-muted-foreground">
                   Canvas Size
                 </Label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   {(Object.keys(canvasPresets) as CanvasPreset[]).map(
                     (preset) => (
                       <button
@@ -1591,8 +1658,9 @@ export function CertificateEditor() {
                           {canvasPresets[preset].label}
                         </span>
                         <span className="mt-1 block text-[10px] text-muted-foreground">
-                          {Math.round(canvasPresets[preset].width)} x{" "}
-                          {Math.round(canvasPresets[preset].height)} pt
+                          {preset === "custom"
+                            ? `${customCanvasWidth} x ${customCanvasHeight} ${customCanvasUnit}`
+                            : `${Math.round(canvasPresets[preset].width)} x ${Math.round(canvasPresets[preset].height)} px`}
                         </span>
                       </button>
                     ),
@@ -1600,30 +1668,85 @@ export function CertificateEditor() {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <Label className="text-xs font-semibold text-muted-foreground">
-                  Orientation
-                </Label>
-                <div className="grid grid-cols-2 gap-2 rounded-md bg-muted/40 p-1">
-                  {(["portrait", "landscape"] as CanvasOrientation[]).map(
-                    (orientation) => (
-                      <button
-                        key={orientation}
-                        type="button"
-                        className={cn(
-                          "rounded px-3 py-2 text-xs font-medium capitalize transition-colors",
-                          blankCanvasOrientation === orientation
-                            ? "bg-background text-foreground shadow-sm"
-                            : "text-muted-foreground hover:text-foreground",
-                        )}
-                        onClick={() => setBlankCanvasOrientation(orientation)}
-                      >
-                        {orientation}
-                      </button>
-                    ),
-                  )}
+              {blankCanvasPreset === "custom" && (
+                <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_96px] items-end gap-3">
+                    <div className="space-y-2">
+                      <Label className="text-xs font-semibold text-muted-foreground">
+                        Width
+                      </Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={customCanvasWidth}
+                        onChange={(event) =>
+                          setCustomCanvasWidth(Number(event.target.value))
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-semibold text-muted-foreground">
+                        Height
+                      </Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={customCanvasHeight}
+                        onChange={(event) =>
+                          setCustomCanvasHeight(Number(event.target.value))
+                        }
+                      />
+                    </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold text-muted-foreground">
+                      Unit
+                    </Label>
+                    <div className="grid h-9 grid-cols-2 gap-1 rounded-md bg-muted/40 p-1">
+                      {(["px", "mm"] as CanvasUnit[]).map((unit) => (
+                        <button
+                          key={unit}
+                          type="button"
+                          className={cn(
+                            "rounded px-2 text-xs font-medium uppercase transition-colors",
+                            customCanvasUnit === unit
+                              ? "bg-background text-foreground shadow-sm"
+                              : "text-muted-foreground hover:text-foreground",
+                          )}
+                          onClick={() => setCustomCanvasUnit(unit)}
+                        >
+                          {unit}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {blankCanvasPreset !== "custom" && (
+                <div className="space-y-2">
+                  <Label className="text-xs font-semibold text-muted-foreground">
+                    Orientation
+                  </Label>
+                  <div className="grid grid-cols-2 gap-2 rounded-md bg-muted/40 p-1">
+                    {(["portrait", "landscape"] as CanvasOrientation[]).map(
+                      (orientation) => (
+                        <button
+                          key={orientation}
+                          type="button"
+                          className={cn(
+                            "rounded px-3 py-2 text-xs font-medium capitalize transition-colors",
+                            blankCanvasOrientation === orientation
+                              ? "bg-background text-foreground shadow-sm"
+                              : "text-muted-foreground hover:text-foreground",
+                          )}
+                          onClick={() => setBlankCanvasOrientation(orientation)}
+                        >
+                          {orientation}
+                        </button>
+                      ),
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
             <DialogFooter className="gap-2">
               <Button
@@ -1655,6 +1778,7 @@ function SidebarEditor({
   onRemoveField,
   onDuplicateField,
   onReorderField,
+  onMoveLayer,
   onSelectField,
   onUpdateField,
   onBulkRowsChange,
@@ -1675,6 +1799,10 @@ function SidebarEditor({
   onRemoveField: (id: string) => void;
   onDuplicateField: (id: string) => void;
   onReorderField: (draggedId: string, targetId: string) => void;
+  onMoveLayer: (
+    id: string,
+    direction: "front" | "back" | "up" | "down",
+  ) => void;
   onSelectField: (id: string) => void;
   onUpdateField: (id: string, patch: Partial<CertificateField>) => void;
   onBulkRowsChange: (rows: BulkRow[]) => void;
@@ -1813,7 +1941,7 @@ function SidebarEditor({
                   </p>
                 </div>
               ) : (
-                fields.map((field) => (
+                fields.map((field, index) => (
                   <div
                     key={field.id}
                     className={cn(
@@ -1854,14 +1982,14 @@ function SidebarEditor({
                       setDragOverLayerId(null);
                     }}
                   >
-                    <div className="flex items-start justify-between gap-1 p-3">
+                    <div className="flex items-center justify-between gap-1 p-3">
                       <Tooltip>
                         <TooltipTrigger
                           render={
                             <button
                               type="button"
                               draggable
-                              className="mt-0.5 flex size-7 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:cursor-grabbing"
+                              className="flex size-7 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:cursor-grabbing"
                               aria-label={`Drag ${field.label} layer`}
                               onDragStart={(event) => {
                                 event.dataTransfer.effectAllowed = "move";
@@ -1902,6 +2030,75 @@ function SidebarEditor({
                         </span>
                       </button>
                       <div className="flex shrink-0 items-center gap-0.5">
+                        <DropdownMenu>
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <DropdownMenuTrigger
+                                  render={
+                                    <Button
+                                      type="button"
+                                      size="icon"
+                                      variant="ghost"
+                                      className="size-6"
+                                      aria-label={`More actions for ${field.label}`}
+                                    >
+                                      <MoreHorizontal className="size-3.5" />
+                                    </Button>
+                                  }
+                                />
+                              }
+                            />
+                            <TooltipContent side="bottom">
+                              More actions
+                            </TooltipContent>
+                          </Tooltip>
+                          <DropdownMenuContent align="end" className="w-44">
+                            <DropdownMenuItem
+                              disabled={index === 0}
+                              onClick={() => onMoveLayer(field.id, "front")}
+                            >
+                              <ChevronsUp className="size-4 text-muted-foreground" />
+                              Bring to front
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              disabled={index === 0}
+                              onClick={() => onMoveLayer(field.id, "up")}
+                            >
+                              <ChevronUp className="size-4 text-muted-foreground" />
+                              Move up
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              disabled={index === fields.length - 1}
+                              onClick={() => onMoveLayer(field.id, "down")}
+                            >
+                              <ChevronDown className="size-4 text-muted-foreground" />
+                              Move down
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              disabled={index === fields.length - 1}
+                              onClick={() => onMoveLayer(field.id, "back")}
+                            >
+                              <ChevronsDown className="size-4 text-muted-foreground" />
+                              Send to back
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() =>
+                                onUpdateField(field.id, {
+                                  locked: !field.locked,
+                                })
+                              }
+                            >
+                              {field.locked ? (
+                                <Unlock className="size-4 text-muted-foreground" />
+                              ) : (
+                                <Lock className="size-4 text-muted-foreground" />
+                              )}
+                              {field.locked ? "Unlock layer" : "Lock layer"}
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+
                         <Tooltip>
                           <TooltipTrigger
                             render={
@@ -1909,13 +2106,13 @@ function SidebarEditor({
                                 type="button"
                                 size="icon"
                                 variant="ghost"
-                                className="size-8"
+                                className="size-6"
                                 aria-label={`Duplicate ${field.label}`}
                                 onClick={() => {
                                   onDuplicateField(field.id);
                                 }}
                               >
-                                <Copy className="size-4" />
+                                <Copy className="size-3.5" />
                               </Button>
                             }
                           />
@@ -1931,7 +2128,7 @@ function SidebarEditor({
                                 type="button"
                                 size="icon"
                                 variant="ghost"
-                                className="size-8"
+                                className="size-6"
                                 aria-label={
                                   field.visible
                                     ? `Hide ${field.label}`
@@ -1945,9 +2142,9 @@ function SidebarEditor({
                                 }}
                               >
                                 {field.visible ? (
-                                  <Eye className="size-4" />
+                                  <Eye className="size-3.5" />
                                 ) : (
-                                  <EyeOff className="size-4" />
+                                  <EyeOff className="size-3.5" />
                                 )}
                               </Button>
                             }
@@ -1968,7 +2165,7 @@ function SidebarEditor({
                                     ? "default"
                                     : "ghost"
                                 }
-                                className="size-8"
+                                className="size-6"
                                 aria-label={`Edit styling ${field.label}`}
                                 onClick={() => {
                                   onSelectField(field.id);
@@ -1979,7 +2176,7 @@ function SidebarEditor({
                                   );
                                 }}
                               >
-                                <Pencil className="size-4" />
+                                <Pencil className="size-3.5" />
                               </Button>
                             }
                           />
@@ -2190,7 +2387,7 @@ function PreviewField({
   const height = (field.height / pageSize.height) * previewSize.height;
 
   function handlePointerDown(event: React.PointerEvent<HTMLButtonElement>) {
-    if (!pageSize || !previewSize) {
+    if (!pageSize || !previewSize || field.locked) {
       return;
     }
 
@@ -2325,7 +2522,7 @@ function PreviewField({
   }
 
   function handleResizePointerDown(event: React.PointerEvent<HTMLSpanElement>) {
-    if (!pageSize || !previewSize) {
+    if (!pageSize || !previewSize || field.locked) {
       return;
     }
 
@@ -2387,6 +2584,7 @@ function PreviewField({
       className={cn(
         "absolute touch-none select-none border border-transparent bg-transparent px-1 text-left cursor-move",
         field.type === "image" && "overflow-hidden",
+        field.locked && "cursor-default",
         selected && "border-dashed border-primary bg-primary/10",
         dragging && "border-solid border-primary bg-primary/20",
       )}
@@ -2419,7 +2617,7 @@ function PreviewField({
       onDoubleClick={(event) => {
         event.stopPropagation();
 
-        if (field.type === "text") {
+        if (field.type === "text" && !field.locked) {
           onEditStart();
         }
       }}
@@ -2495,13 +2693,27 @@ function PreviewField({
           className="h-full w-full"
           style={{
             backgroundColor:
-              field.shapeType === "line" ? "transparent" : field.fillColor,
-            border:
+              field.shapeType === "line"
+                ? field.strokeColor
+                : field.fillColor,
+            borderStyle:
               field.strokeWidth &&
               field.strokeColor &&
               field.shapeType !== "line"
-                ? `${(field.strokeWidth / pageSize.height) * previewSize.height}px solid ${field.strokeColor}`
-                : "none",
+                ? "solid"
+                : undefined,
+            borderWidth:
+              field.strokeWidth &&
+              field.strokeColor &&
+              field.shapeType !== "line"
+                ? `${(field.strokeWidth / pageSize.height) * previewSize.height}px`
+                : undefined,
+            borderColor:
+              field.strokeWidth &&
+              field.strokeColor &&
+              field.shapeType !== "line"
+                ? field.strokeColor
+                : undefined,
             borderRadius:
               field.shapeType === "circle"
                 ? "50%"
@@ -2510,10 +2722,6 @@ function PreviewField({
               field.shapeType === "line"
                 ? `${((field.strokeWidth ?? 2) / pageSize.height) * previewSize.height}px`
                 : "100%",
-            borderTop:
-              field.shapeType === "line" && field.strokeColor
-                ? `${((field.strokeWidth ?? 2) / pageSize.height) * previewSize.height}px solid ${field.strokeColor}`
-                : undefined,
           }}
         />
       ) : (
@@ -2537,7 +2745,7 @@ function PreviewField({
           {field.value || field.label}
         </span>
       )}
-      {selected ? (
+      {selected && !field.locked ? (
         <>
           <div className="absolute -top-7 left-0 z-50 flex h-6 w-max whitespace-nowrap items-center gap-2 rounded-full bg-popover px-2.5 py-1 text-[10px] font-bold font-sans text-popover-foreground shadow-sm ring-1 ring-border transition-all duration-300">
             <span className="text-[9px] font-black text-muted-foreground uppercase tracking-tighter">
