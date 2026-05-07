@@ -49,6 +49,10 @@ import {
   Square,
   Circle,
   RotateCw,
+  Info,
+  Star,
+  Clock,
+  Heart,
 } from "lucide-react";
 import Papa from "papaparse";
 
@@ -83,6 +87,7 @@ import {
   MenubarItem,
   MenubarMenu,
   MenubarSeparator,
+  MenubarShortcut,
   MenubarSub,
   MenubarSubContent,
   MenubarSubTrigger,
@@ -97,6 +102,10 @@ import {
 import { toast } from "sonner";
 import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
+import { GoogleFontSelect } from "./google-font-select";
+import { LayersSidebar } from "./layers-sidebar";
+import { PreviewField } from "./preview-field";
+import { PropertiesSidebar } from "./properties-sidebar";
 import { generateCertificatePdf } from "@/lib/pdf/generate-certificate";
 import type {
   CertificateField,
@@ -104,122 +113,19 @@ import type {
   CertificateFieldFont,
   CertificateFieldFontWeight,
   PdfPageSize,
+  BulkRow,
 } from "@/types/certificate-field";
-
-const previewFontFamily: Record<string, string> = {};
-
-const previewFontWeight: Record<CertificateFieldFontWeight, number> = {
-  regular: 400,
-  medium: 500,
-  semibold: 600,
-  bold: 700,
-};
-
-const certificateFontGroups = [
-  {
-    label: "Formal Serif",
-    fonts: [
-      "Playfair Display",
-      "Merriweather",
-      "Cormorant Garamond",
-      "Libre Baskerville",
-      "Lora",
-      "Crimson Text",
-      "EB Garamond",
-      "Bitter",
-    ],
-  },
-  {
-    label: "Elegant Display",
-    fonts: [
-      "Cinzel",
-      "Prata",
-      "Bodoni Moda",
-      "Marcellus",
-      "Forum",
-      "DM Serif Display",
-    ],
-  },
-  {
-    label: "Signature Script",
-    fonts: [
-      "Great Vibes",
-      "Dancing Script",
-      "Allura",
-      "Parisienne",
-      "Sacramento",
-      "Alex Brush",
-    ],
-  },
-  {
-    label: "Modern Sans",
-    fonts: ["Montserrat", "Poppins", "Raleway", "Inter", "Open Sans", "Roboto"],
-  },
-];
-
-const googleCertificateFonts = certificateFontGroups.flatMap(
-  (group) => group.fonts,
-);
-const googleCertificateFontSet = new Set(googleCertificateFonts);
-
-function getFontStack(fontFamily: string) {
-  return (
-    previewFontFamily[fontFamily] ??
-    `"${fontFamily}", Arial, Helvetica, sans-serif`
-  );
-}
-
-function googleFontUrl(fontFamilies: string[]) {
-  const families = Array.from(
-    new Set(fontFamilies.filter((font) => googleCertificateFontSet.has(font))),
-  );
-
-  if (!families.length) {
-    return "";
-  }
-
-  const query = families
-    .map(
-      (font) =>
-        `family=${font.trim().replace(/\s+/g, "+")}:wght@400;500;600;700`,
-    )
-    .join("&");
-
-  return `https://fonts.googleapis.com/css2?${query}&display=swap`;
-}
-
-function useGoogleFontLoader(fontFamilies: string[]) {
-  const [loadVersion, setLoadVersion] = useState(0);
-  const fontKey = Array.from(
-    new Set(fontFamilies.filter((font) => googleCertificateFontSet.has(font))),
-  )
-    .sort()
-    .join("|");
-
-  useEffect(() => {
-    const fonts = fontKey ? fontKey.split("|") : [];
-    const href = googleFontUrl(fonts);
-
-    if (!href || document.querySelector(`link[href="${href}"]`)) {
-      void Promise.all(
-        fonts.map((font) => document.fonts?.load(`400 20px "${font}"`)),
-      ).finally(() => setLoadVersion((version) => version + 1));
-      return;
-    }
-
-    const link = document.createElement("link");
-    link.rel = "stylesheet";
-    link.href = href;
-    link.onload = () => {
-      void Promise.all(
-        fonts.map((font) => document.fonts?.load(`400 20px "${font}"`)),
-      ).finally(() => setLoadVersion((version) => version + 1));
-    };
-    document.head.appendChild(link);
-  }, [fontKey]);
-
-  return loadVersion;
-}
+import {
+  certificateFonts,
+  getFontStack,
+  addRecentFont,
+  getRecentFonts,
+  getFavoriteFonts,
+  toggleFavoriteFont,
+  failedFonts,
+  useGoogleFontLoader,
+  googleCertificateFontSet,
+} from "@/lib/fonts";
 
 const defaultField: Omit<CertificateField, "id" | "label"> = {
   type: "text",
@@ -443,7 +349,6 @@ async function clearTemplateFromDB() {
   tx.objectStore(STORE_NAME).delete("current");
 }
 
-type BulkRow = Record<string, string>;
 type SaveFilePickerHandle = {
   createWritable: () => Promise<{
     write: (data: string) => Promise<void>;
@@ -472,7 +377,7 @@ export function CertificateEditor() {
   const [fields, setFields] = useState<CertificateField[]>([]);
   const [selectedFieldId, setSelectedFieldId] = useState("");
   const [isRendering, setIsRendering] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [isGenerating, setIsGenerating] = useState<"pdf" | "jpg" | null>(null);
   const [draggingFieldId, setDraggingFieldId] = useState<string | null>(null);
   const [canvasZoom, setCanvasZoom] = useState(1);
   const [canvasPan, setCanvasPan] = useState({ x: 0, y: 0 });
@@ -482,12 +387,13 @@ export function CertificateEditor() {
   const [bulkRows, setBulkRows] = useState<BulkRow[]>([]);
   const [bulkPreviewIndex, setBulkPreviewIndex] = useState(0);
   const [filenameTemplate, setFilenameTemplate] = useState(
-    "certificate-{row}.pdf",
+    "certificate-{row}",
   );
   const [isLoaded, setIsLoaded] = useState(false);
   const [isBlankProjectDialogOpen, setIsBlankProjectDialogOpen] =
     useState(false);
   const [isNewProjectDialogOpen, setIsNewProjectDialogOpen] = useState(false);
+  const [isAboutDialogOpen, setIsAboutDialogOpen] = useState(false);
   const [blankCanvasPreset, setBlankCanvasPreset] =
     useState<CanvasPreset>("a4");
   const [blankCanvasOrientation, setBlankCanvasOrientation] =
@@ -497,6 +403,7 @@ export function CertificateEditor() {
   const [customCanvasUnit, setCustomCanvasUnit] = useState<CanvasUnit>("px");
   const [isTooSmall, setIsTooSmall] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(0);
+  const [layersSidebarWidth, setLayersSidebarWidth] = useState(280);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const projectInputRef = useRef<HTMLInputElement>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
@@ -573,11 +480,11 @@ export function CertificateEditor() {
       const pdf = await loadingTask.promise;
       const page = await pdf.getPage(1);
       const baseViewport = page.getViewport({ scale: 1 });
-      const containerWidth = Math.max(240, window.innerWidth - 390 - 96);
-      const containerHeight = Math.max(240, window.innerHeight - 96);
+      const containerWidth = Math.max(240, window.innerWidth - 390 - 160);
+      const containerHeight = Math.max(240, window.innerHeight - 160);
       const widthScale = containerWidth / baseViewport.width;
       const heightScale = containerHeight / baseViewport.height;
-      const scale = Math.min(widthScale, heightScale);
+      const scale = Math.min(widthScale, heightScale) * 0.9; // Scale down to 90% of the container for breathing room
       const viewport = page.getViewport({ scale });
       const canvas = canvasRef.current;
 
@@ -656,11 +563,36 @@ export function CertificateEditor() {
       } else if (isCmd && isY) {
         event.preventDefault();
         redo();
+      } else if (isCmd && (event.key === "+" || event.key === "=" || event.key === "-" || event.key === "_" || event.key === "0")) {
+        // Disable browser zoom shortcuts
+        event.preventDefault();
+      } else if ((event.key === "Delete" || event.key === "Backspace") && selectedFieldId) {
+        // Only delete if not typing in an input or textarea
+        const activeElement = document.activeElement;
+        const isTyping = activeElement instanceof HTMLInputElement || activeElement instanceof HTMLTextAreaElement;
+        
+        if (!isTyping) {
+          event.preventDefault();
+          removeField(selectedFieldId);
+        }
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+
+    // Disable Ctrl + Wheel zoom
+    function handleWheel(event: WheelEvent) {
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault();
+      }
+    }
+
+    window.addEventListener("wheel", handleWheel, { passive: false });
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("wheel", handleWheel);
+    };
   }, [undo, redo]);
 
   function addField() {
@@ -918,7 +850,7 @@ export function CertificateEditor() {
     setSelectedFieldId("");
     setBulkRows([]);
     setBulkPreviewIndex(0);
-    setFilenameTemplate("certificate-{row}.pdf");
+    setFilenameTemplate("certificate-{row}");
     setFileName(nextFileName);
     setTemplateBytes(bytes);
     setPageSize(null);
@@ -942,7 +874,7 @@ export function CertificateEditor() {
     setSelectedFieldId("");
     setBulkRows([]);
     setBulkPreviewIndex(0);
-    setFilenameTemplate("certificate-{row}.pdf");
+    setFilenameTemplate("certificate-{row}");
     setEditingFieldId(null);
     setDraggingFieldId(null);
     resetCanvasView();
@@ -955,19 +887,19 @@ export function CertificateEditor() {
       return;
     }
 
-    setIsGenerating(true);
+    setIsGenerating("pdf");
     const bytes = await generateCertificatePdf(
       templateBytes.slice(0),
       getFieldsForRendering(fields),
     );
     const safeName = fileName.replace(/\.pdf$/i, "") || "certificate";
     downloadBytes(bytes, `${safeName}-generated.pdf`);
-    setIsGenerating(false);
+    setIsGenerating(null);
   }
 
   async function generateJpg() {
     if (!templateBytes) return;
-    setIsGenerating(true);
+    setIsGenerating("jpg");
 
     try {
       // 1. Generate the final PDF with fields
@@ -1011,7 +943,7 @@ export function CertificateEditor() {
       console.error("JPG generation error:", error);
       toast.error("Failed to create JPG.");
     } finally {
-      setIsGenerating(false);
+      setIsGenerating(null);
     }
   }
 
@@ -1046,9 +978,8 @@ export function CertificateEditor() {
       .replace(/\s+/g, " ")
       .trim();
 
-    return safe.toLowerCase().endsWith(".pdf")
-      ? safe
-      : `${safe || `certificate-${rowIndex + 1}`}.pdf`;
+    // Strip extension if user accidentally typed it
+    return safe.replace(/\.(pdf|jpg|jpeg|png)$/i, "") || `certificate-${rowIndex + 1}`;
   }
 
   async function generateBulkZip(type: "pdf" | "jpg" = "pdf") {
@@ -1056,7 +987,7 @@ export function CertificateEditor() {
       return;
     }
 
-    setIsGenerating(true);
+    setIsGenerating(type);
     const zip = new JSZip();
 
     try {
@@ -1075,7 +1006,7 @@ export function CertificateEditor() {
         const filename = buildBulkFilename(row, index);
 
         if (type === "pdf") {
-          zip.file(filename, pdfBytes);
+          zip.file(`${filename}.pdf`, pdfBytes);
         } else {
           // Convert to JPG
           const loadingTask = pdfjs.getDocument({ data: pdfBytes });
@@ -1091,7 +1022,7 @@ export function CertificateEditor() {
               .promise;
             const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
             const base64Data = dataUrl.split(",")[1];
-            zip.file(filename.replace(/\.pdf$/i, ".jpg"), base64Data, {
+            zip.file(`${filename}.jpg`, base64Data, {
               base64: true,
             });
           }
@@ -1107,7 +1038,7 @@ export function CertificateEditor() {
       console.error("Bulk generation error:", error);
       toast.error(`Failed to create bulk ${type.toUpperCase()}.`);
     } finally {
-      setIsGenerating(false);
+      setIsGenerating(null);
     }
   }
 
@@ -1116,6 +1047,17 @@ export function CertificateEditor() {
       const nextZoom = Math.min(3, Math.max(0.4, current + delta));
       return Number(nextZoom.toFixed(2));
     });
+  }
+
+  function handleWorkspacePointerDown(event: React.PointerEvent<HTMLElement>) {
+    if (event.button === 1) {
+      handleCanvasPanStart(event);
+      return;
+    }
+
+    if (event.button === 0 && (event.target === event.currentTarget || (canvasRef.current && event.target === canvasRef.current))) {
+      setSelectedFieldId("");
+    }
   }
 
   function handleCanvasPanStart(event: React.PointerEvent<HTMLElement>) {
@@ -1193,6 +1135,28 @@ export function CertificateEditor() {
   const canPreviewFields = Boolean(pageSize && previewSize);
   useGoogleFontLoader(fields.map((field) => field.fontFamily));
 
+  function handleSidebarResize(e: React.MouseEvent) {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = layersSidebarWidth;
+
+    function onMouseMove(moveEvent: MouseEvent) {
+      const deltaX = moveEvent.clientX - startX;
+      const newWidth = Math.min(Math.max(200, startWidth + deltaX), 600);
+      setLayersSidebarWidth(newWidth);
+    }
+
+    function onMouseUp() {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      document.body.style.cursor = "default";
+    }
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+    document.body.style.cursor = "col-resize";
+  }
+
   // Prevent hydration mismatch by not rendering until mounted
   if (!isLoaded) {
     return <div className="h-dvh bg-background" />;
@@ -1217,98 +1181,12 @@ export function CertificateEditor() {
   }
 
   return (
-    <main className="h-dvh overflow-hidden bg-background text-foreground transition-colors duration-300">
+    <main
+      className="h-dvh overflow-hidden bg-background text-foreground transition-colors duration-300"
+      onContextMenu={(e) => e.preventDefault()}
+    >
       <div className="relative flex h-full min-h-0 flex-col">
-        {templateBytes && (
-          <div className="absolute left-6 top-6 z-50">
-            <Menubar>
-              <MenubarMenu>
-                <MenubarTrigger>File</MenubarTrigger>
-                <MenubarContent>
-                  <MenubarItem onClick={() => setIsNewProjectDialogOpen(true)}>
-                    <FilePlus className="size-3 text-muted-foreground" />
-                    New Project
-                  </MenubarItem>
-                  <MenubarItem onClick={() => projectInputRef.current?.click()}>
-                    <FolderOpen className="size-3 text-muted-foreground" />
-                    Open Project
-                  </MenubarItem>
-                  <MenubarSeparator />
-                  <MenubarItem
-                    onClick={exportProject}
-                    disabled={!templateBytes}
-                  >
-                    <Save className="size-3 text-muted-foreground" />
-                    Save Project
-                  </MenubarItem>
-                  <MenubarSub>
-                    <MenubarSubTrigger>
-                      <Download className="size-3 text-muted-foreground" />
-                      Download
-                    </MenubarSubTrigger>
-                    <MenubarSubContent>
-                      <MenubarItem
-                        onClick={generatePdf}
-                        disabled={!templateBytes || isGenerating}
-                      >
-                        <FileText
-                          className={cn(
-                            "size-3 text-muted-foreground",
-                            isGenerating && "animate-bounce",
-                          )}
-                        />
-                        PDF
-                      </MenubarItem>
-                      <MenubarItem
-                        onClick={generateJpg}
-                        disabled={!templateBytes || isGenerating}
-                      >
-                        <ImageIcon className="size-3 text-muted-foreground" />
-                        JPG
-                      </MenubarItem>
-                    </MenubarSubContent>
-                  </MenubarSub>
-                </MenubarContent>
-              </MenubarMenu>
 
-              <MenubarMenu>
-                <MenubarTrigger>Edit</MenubarTrigger>
-                <MenubarContent>
-                  <MenubarItem
-                    onClick={() => pdfInputRef.current?.click()}
-                    disabled={!templateBytes}
-                  >
-                    <FileUp className="size-3 text-muted-foreground" />
-                    Change PDF / Image
-                  </MenubarItem>
-                </MenubarContent>
-              </MenubarMenu>
-
-              <MenubarMenu>
-                <MenubarTrigger>View</MenubarTrigger>
-                <MenubarContent>
-                  <MenubarItem
-                    onClick={() =>
-                      setTheme(theme === "dark" ? "light" : "dark")
-                    }
-                  >
-                    {theme === "dark" ? (
-                      <Sun className="size-3 text-muted-foreground" />
-                    ) : (
-                      <Moon className="size-3 text-muted-foreground" />
-                    )}
-                    Toggle Theme
-                  </MenubarItem>
-                  <MenubarSeparator />
-                  <MenubarItem onClick={resetCanvasView}>
-                    <RotateCcw className="size-3 text-muted-foreground" />
-                    Reset Zoom
-                  </MenubarItem>
-                </MenubarContent>
-              </MenubarMenu>
-            </Menubar>
-          </div>
-        )}
 
         <input
           ref={projectInputRef}
@@ -1330,66 +1208,153 @@ export function CertificateEditor() {
         />
 
         <div
-          className={cn(
-            "grid min-h-0 flex-1 overflow-hidden",
-            templateBytes
-              ? "grid-cols-[minmax(0,1fr)_390px]"
-              : "grid-cols-[minmax(0,1fr)]",
-          )}
+          className="flex min-h-0 flex-1 overflow-hidden"
         >
+          {templateBytes ? (
+            <>
+              <div style={{ width: layersSidebarWidth }} className="shrink-0 h-full">
+                <LayersSidebar
+                  fields={fields}
+                  selectedFieldId={selectedFieldId}
+                  onAddField={addField}
+                  onAddImageField={addImageField}
+                  onAddShapeField={addShapeField}
+                  onReorderField={reorderField}
+                  onSelectField={setSelectedFieldId}
+                  onUpdateField={updateField}
+                  onDuplicateField={duplicateField}
+                  onRemoveField={removeField}
+                  onMoveLayer={moveFieldLayer}
+                />
+              </div>
+              <div
+                className="relative z-50 w-px cursor-col-resize bg-border transition-colors"
+                onMouseDown={handleSidebarResize}
+              >
+                <div className="absolute inset-y-0 -left-1 -right-1 cursor-col-resize" />
+              </div>
+            </>
+          ) : null}
+
           <section
             className={cn(
-              "relative overflow-hidden p-6",
+              "relative flex-1 overflow-hidden p-12 bg-muted/20",
               isCanvasPanning ? "cursor-grabbing" : "cursor-default",
             )}
-            onPointerDown={handleCanvasPanStart}
+            onPointerDown={handleWorkspacePointerDown}
             onAuxClick={(event) => event.preventDefault()}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
           >
             {templateBytes ? (
-              <div className="absolute right-4 top-4 z-20 flex items-center gap-1.5 rounded-md border bg-background/80 backdrop-blur-md px-1 py-0.5 text-[10px] font-medium transition-colors duration-300">
-                <div className="flex items-center gap-0.5 border-r pr-1.5 mr-0.5">
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <Button
-                          type="button"
-                          size="icon"
-                          variant="ghost"
-                          className="h-6 w-6"
-                          disabled={past.length === 0}
-                          onClick={undo}
+              <>
+                <div className="absolute left-4 top-4 z-50">
+                  <Menubar className="bg-background/80 backdrop-blur-md">
+                    <MenubarMenu>
+                      <MenubarTrigger>File</MenubarTrigger>
+                      <MenubarContent>
+                        <MenubarItem onClick={() => setIsNewProjectDialogOpen(true)}>
+                          <FilePlus className="size-3 text-muted-foreground" />
+                          New Project
+                        </MenubarItem>
+                        <MenubarItem onClick={() => projectInputRef.current?.click()}>
+                          <FolderOpen className="size-3 text-muted-foreground" />
+                          Open Project
+                        </MenubarItem>
+                        <MenubarSeparator />
+                        <MenubarItem
+                          onClick={exportProject}
+                          disabled={!templateBytes}
                         >
-                          <Undo className="size-3 text-muted-foreground" />
-                        </Button>
-                      }
-                    />
-                    <TooltipContent side="bottom">Undo (Cmd+Z)</TooltipContent>
-                  </Tooltip>
+                          <Save className="size-3 text-muted-foreground" />
+                          Save Project
+                        </MenubarItem>
+                        <MenubarSub>
+                          <MenubarSubTrigger>
+                            <Download className="size-3 text-muted-foreground" />
+                            Download
+                          </MenubarSubTrigger>
+                          <MenubarSubContent>
+                            <MenubarItem
+                              onClick={generatePdf}
+                              disabled={!templateBytes || !!isGenerating}
+                            >
+                              <FileText className="size-3 text-muted-foreground" />
+                              PDF
+                            </MenubarItem>
+                            <MenubarItem
+                              onClick={generateJpg}
+                              disabled={!templateBytes || !!isGenerating}
+                            >
+                              <ImageIcon className="size-3 text-muted-foreground" />
+                              JPG
+                            </MenubarItem>
+                          </MenubarSubContent>
+                        </MenubarSub>
+                      </MenubarContent>
+                    </MenubarMenu>
 
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <Button
-                          type="button"
-                          size="icon"
-                          variant="ghost"
-                          className="h-6 w-6"
-                          disabled={future.length === 0}
-                          onClick={redo}
-                        >
+                    <MenubarMenu>
+                      <MenubarTrigger>Edit</MenubarTrigger>
+                      <MenubarContent>
+                        <MenubarItem onClick={undo} disabled={past.length === 0}>
+                          <Undo className="size-3 text-muted-foreground" />
+                          Undo
+                          <MenubarShortcut>⌘Z</MenubarShortcut>
+                        </MenubarItem>
+                        <MenubarItem onClick={redo} disabled={future.length === 0}>
                           <Redo className="size-3 text-muted-foreground" />
-                        </Button>
-                      }
-                    />
-                    <TooltipContent side="bottom">
-                      Redo (Cmd+Shift+Z)
-                    </TooltipContent>
-                  </Tooltip>
+                          Redo
+                          <MenubarShortcut>⌘⇧Z</MenubarShortcut>
+                        </MenubarItem>
+                        <MenubarSeparator />
+                        <MenubarItem
+                          onClick={() => pdfInputRef.current?.click()}
+                          disabled={!templateBytes}
+                        >
+                          <FileUp className="size-3 text-muted-foreground" />
+                          Change PDF / Image
+                        </MenubarItem>
+                      </MenubarContent>
+                    </MenubarMenu>
+
+                    <MenubarMenu>
+                      <MenubarTrigger>View</MenubarTrigger>
+                      <MenubarContent>
+                        <MenubarItem
+                          onClick={() =>
+                            setTheme(theme === "dark" ? "light" : "dark")
+                          }
+                        >
+                          {theme === "dark" ? (
+                            <Sun className="size-3 text-muted-foreground" />
+                          ) : (
+                            <Moon className="size-3 text-muted-foreground" />
+                          )}
+                          Toggle Theme
+                        </MenubarItem>
+                        <MenubarSeparator />
+                        <MenubarItem onClick={resetCanvasView}>
+                          <RotateCcw className="size-3 text-muted-foreground" />
+                          Reset Zoom
+                        </MenubarItem>
+                      </MenubarContent>
+                    </MenubarMenu>
+
+                    <MenubarMenu>
+                      <MenubarTrigger>Help</MenubarTrigger>
+                      <MenubarContent>
+                        <MenubarItem onClick={() => setIsAboutDialogOpen(true)}>
+                          <Info className="size-3 text-muted-foreground" />
+                          About CertGen
+                        </MenubarItem>
+                      </MenubarContent>
+                    </MenubarMenu>
+                  </Menubar>
                 </div>
 
+                <div className="absolute right-4 top-4 z-20 flex items-center gap-1.5 rounded-md border bg-background/80 backdrop-blur-md px-1 py-0.5 text-[10px] font-medium transition-colors duration-300">
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -1430,10 +1395,15 @@ export function CertificateEditor() {
                   <TooltipContent side="bottom">Zoom in</TooltipContent>
                 </Tooltip>
               </div>
-            ) : null}
-            <div className="flex h-full min-h-full items-center justify-center">
+            </>
+          ) : null}
+            <div 
+              className="flex h-full min-h-full items-center justify-center"
+              onPointerDown={handleWorkspacePointerDown}
+            >
               <div
-                className="relative rounded-md border bg-card p-3 shadow-sm transition-colors duration-300"
+                className="relative rounded-lg border bg-background shadow-2xl transition-colors duration-300 overflow-hidden"
+                onPointerDown={handleWorkspacePointerDown}
                 style={{
                   transform: `translate(${canvasPan.x}px, ${canvasPan.y}px) scale(${canvasZoom})`,
                   transformOrigin: "center center",
@@ -1569,31 +1539,24 @@ export function CertificateEditor() {
           </section>
 
           {templateBytes ? (
-            <SidebarEditor
-              fields={fields}
-              selectedFieldId={selectedFieldId}
-              bulkRows={bulkRows}
-              bulkPreviewIndex={bulkPreviewIndex}
-              filenameTemplate={filenameTemplate}
-              onAddField={addField}
-              onAddImageField={addImageField}
-              onAddShapeField={addShapeField}
-              onRemoveField={removeField}
-              onDuplicateField={duplicateField}
-              onReorderField={reorderField}
-              onMoveLayer={moveFieldLayer}
-              onSelectField={setSelectedFieldId}
-              onUpdateField={updateField}
-              onBulkRowsChange={(rows) => {
-                setBulkRows(rows);
-                setBulkPreviewIndex(0);
-              }}
-              onBulkPreviewIndexChange={setBulkPreviewIndex}
-              onFilenameTemplateChange={setFilenameTemplate}
-              onGenerateBulk={generateBulkZip}
-              isGenerating={isGenerating}
-              fileName={fileName}
-            />
+            <div className="w-[300px] shrink-0 h-full border-l">
+              <PropertiesSidebar
+                fields={fields}
+                selectedFieldId={selectedFieldId}
+                bulkRows={bulkRows}
+                bulkPreviewIndex={bulkPreviewIndex}
+                filenameTemplate={filenameTemplate}
+                onUpdateField={updateField}
+                onBulkRowsChange={(rows) => {
+                  setBulkRows(rows);
+                  setBulkPreviewIndex(0);
+                }}
+                onBulkPreviewIndexChange={setBulkPreviewIndex}
+                onFilenameTemplateChange={setFilenameTemplate}
+                onGenerateBulk={generateBulkZip}
+                isGenerating={isGenerating}
+              />
+            </div>
           ) : null}
         </div>
 
@@ -1761,2175 +1724,43 @@ export function CertificateEditor() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        <Dialog
+          open={isAboutDialogOpen}
+          onOpenChange={setIsAboutDialogOpen}
+        >
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>About CertGen</DialogTitle>
+              <DialogDescription>
+                CertGen is a powerful and efficient bulk PDF certificate generator.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="py-2">
+              <div className="rounded-lg bg-muted p-4">
+                <h4 className="mb-2 text-sm font-semibold">Features</h4>
+                <ul className="list-inside list-disc text-xs space-y-1 text-muted-foreground">
+                  <li>Visual PDF/Image template editor</li>
+                  <li>Dynamic text, image, and shape layers</li>
+                  <li>Bulk generation from CSV data</li>
+                  <li>Real-time preview and snapping guides</li>
+                  <li>Project save/load functionality</li>
+                </ul>
+              </div>
+              <p className="text-[10px] text-center text-muted-foreground mt-4">
+                Version 1.0 &copy; 2026 masarisgk
+              </p>
+            </div>
+            <DialogFooter>
+              <Button onClick={() => setIsAboutDialogOpen(false)}>
+                Close
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
       </div>
     </main>
   );
 }
 
-function SidebarEditor({
-  fields,
-  selectedFieldId,
-  bulkRows,
-  bulkPreviewIndex,
-  filenameTemplate,
-  onAddField,
-  onAddImageField,
-  onAddShapeField,
-  onRemoveField,
-  onDuplicateField,
-  onReorderField,
-  onMoveLayer,
-  onSelectField,
-  onUpdateField,
-  onBulkRowsChange,
-  onBulkPreviewIndexChange,
-  onFilenameTemplateChange,
-  onGenerateBulk,
-  isGenerating,
-  fileName,
-}: {
-  fields: CertificateField[];
-  selectedFieldId: string;
-  bulkRows: BulkRow[];
-  bulkPreviewIndex: number;
-  filenameTemplate: string;
-  onAddField: () => void;
-  onAddImageField: () => void;
-  onAddShapeField: (shapeType: "rectangle" | "circle" | "line") => void;
-  onRemoveField: (id: string) => void;
-  onDuplicateField: (id: string) => void;
-  onReorderField: (draggedId: string, targetId: string) => void;
-  onMoveLayer: (
-    id: string,
-    direction: "front" | "back" | "up" | "down",
-  ) => void;
-  onSelectField: (id: string) => void;
-  onUpdateField: (id: string, patch: Partial<CertificateField>) => void;
-  onBulkRowsChange: (rows: BulkRow[]) => void;
-  onBulkPreviewIndexChange: (index: number) => void;
-  onFilenameTemplateChange: (value: string) => void;
-  onGenerateBulk: (type: "pdf" | "jpg") => void;
-  isGenerating: boolean;
-  fileName: string;
-}) {
-  const [activeSidebarTab, setActiveSidebarTab] = useState("fields");
-  const [expandedFieldId, setExpandedFieldId] = useState<string | null>(null);
-  const [fieldToDelete, setFieldToDelete] = useState<CertificateField | null>(
-    null,
-  );
-  const [draggingLayerId, setDraggingLayerId] = useState<string | null>(null);
-  const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null);
-
-  // Sync expanded state with selection
-  useEffect(() => {
-    if (selectedFieldId) {
-      queueMicrotask(() => setExpandedFieldId(selectedFieldId));
-    }
-  }, [selectedFieldId]);
-
-  function handleAddField() {
-    onAddField();
-    // No longer switching tabs, we'll let the selection/expansion handle it
-    setActiveSidebarTab("fields");
-  }
-
-  function handleAddImageField() {
-    onAddImageField();
-    setActiveSidebarTab("fields");
-  }
-
-  function handleAddShapeField(shapeType: "rectangle" | "circle" | "line") {
-    onAddShapeField(shapeType);
-    setActiveSidebarTab("fields");
-  }
-
-  // Sync expanded state with selection if needed, or just let manual toggle work.
-  // The user specifically mentioned "pressing the edit button".
-
-  return (
-    <aside className="h-full min-h-0 overflow-hidden border-l text-sidebar-foreground transition-colors duration-300">
-      <Tabs
-        value={activeSidebarTab}
-        onValueChange={(value) => setActiveSidebarTab(String(value))}
-        className="flex h-full min-h-0 flex-col gap-0"
-      >
-        <div className="border-b px-4 py-4">
-          <div className="mb-3">
-            <h2 className="text-sm font-semibold">CertGen</h2>
-            <p
-              className="max-w-[180px] truncate text-[10px] text-muted-foreground"
-              title={fileName}
-            >
-              File: {fileName || "Certificate Editor"}
-            </p>
-          </div>
-          <TabsList className="h-9 w-full bg-input/50 p-1">
-            <TabsTrigger value="fields" className="flex-1 transition-all">
-              Fields
-            </TabsTrigger>
-            <TabsTrigger value="bulk" className="flex-1 transition-all">
-              Bulk
-            </TabsTrigger>
-          </TabsList>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-          <TabsContent value="fields" keepMounted className="m-0 p-4">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-semibold">Layers</h3>
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                  {fields.length} Layers
-                </p>
-              </div>
-              <div className="flex shrink-0 gap-1.5">
-                <Button size="sm" variant="outline" onClick={handleAddField}>
-                  <Plus className="mr-1.5 size-3" />
-                  Text
-                </Button>
-
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    render={
-                      <Button size="sm" variant="outline">
-                        <Shapes className="mr-1.5 size-3" />
-                        Shape
-                      </Button>
-                    }
-                  />
-                  <DropdownMenuContent align="end" className="w-32">
-                    <DropdownMenuItem
-                      onClick={() => handleAddShapeField("rectangle")}
-                    >
-                      <Square className="size-4 text-muted-foreground" />
-                      Rectangle
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => handleAddShapeField("circle")}
-                    >
-                      <Circle className="size-4 text-muted-foreground" />
-                      Circle
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => handleAddShapeField("line")}
-                    >
-                      <Minus className="size-4 text-muted-foreground" />
-                      Line
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handleAddImageField}
-                >
-                  <ImageIcon className="mr-1.5 size-3" />
-                  Image
-                </Button>
-              </div>
-            </div>
-            <div className="space-y-2">
-              {fields.length === 0 ? (
-                <div className="flex flex-col items-center justify-center rounded-md border border-dashed py-12 text-center">
-                  <div className="mb-2 rounded-full bg-muted p-3">
-                    <Plus className="size-6 text-muted-foreground" />
-                  </div>
-                  <p className="text-sm font-medium">No fields yet</p>
-                  <p className="max-w-[200px] text-xs text-muted-foreground">
-                    Add a text or image field to start editing the certificate.
-                  </p>
-                </div>
-              ) : (
-                fields.map((field, index) => (
-                  <div
-                    key={field.id}
-                    className={cn(
-                      "w-full overflow-hidden rounded-md border text-sm transition-colors",
-                      field.id === selectedFieldId
-                        ? "border-primary/50 bg-input/50"
-                        : "bg-input/30 border-border hover:bg-muted/50",
-                      draggingLayerId === field.id && "opacity-50",
-                      dragOverLayerId === field.id &&
-                        draggingLayerId !== field.id &&
-                        "border-primary bg-primary/10",
-                    )}
-                    onDragOver={(event) => {
-                      event.preventDefault();
-                      event.dataTransfer.dropEffect = "move";
-                      setDragOverLayerId(field.id);
-                    }}
-                    onDragLeave={(event) => {
-                      if (
-                        !event.currentTarget.contains(
-                          event.relatedTarget as Node | null,
-                        )
-                      ) {
-                        setDragOverLayerId(null);
-                      }
-                    }}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      const draggedId =
-                        event.dataTransfer.getData("text/plain") ||
-                        draggingLayerId;
-
-                      if (draggedId) {
-                        onReorderField(draggedId, field.id);
-                      }
-
-                      setDraggingLayerId(null);
-                      setDragOverLayerId(null);
-                    }}
-                  >
-                    <div className="flex items-center justify-between gap-1 p-3">
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <button
-                              type="button"
-                              draggable
-                              className="flex size-7 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:cursor-grabbing"
-                              aria-label={`Drag ${field.label} layer`}
-                              onDragStart={(event) => {
-                                event.dataTransfer.effectAllowed = "move";
-                                event.dataTransfer.setData(
-                                  "text/plain",
-                                  field.id,
-                                );
-                                setDraggingLayerId(field.id);
-                                setDragOverLayerId(field.id);
-                              }}
-                              onDragEnd={() => {
-                                setDraggingLayerId(null);
-                                setDragOverLayerId(null);
-                              }}
-                            >
-                              <GripVertical className="size-4" />
-                            </button>
-                          }
-                        />
-                        <TooltipContent side="bottom">
-                          Drag to reorder layer
-                        </TooltipContent>
-                      </Tooltip>
-                      <button
-                        type="button"
-                        className="min-w-0 flex-1 text-left"
-                        onClick={() => onSelectField(field.id)}
-                      >
-                        <span className="block truncate font-medium text-foreground">
-                          {field.label}
-                        </span>
-                        <span className="mt-1 block truncate text-[10px] text-muted-foreground">
-                          {field.type === "image"
-                            ? field.imageDataUrl
-                              ? `Image Layer • ${Math.round(field.width)}x${Math.round(field.height)}px`
-                              : "No image"
-                            : field.value}
-                        </span>
-                      </button>
-                      <div className="flex shrink-0 items-center gap-0.5">
-                        <DropdownMenu>
-                          <Tooltip>
-                            <TooltipTrigger
-                              render={
-                                <DropdownMenuTrigger
-                                  render={
-                                    <Button
-                                      type="button"
-                                      size="icon"
-                                      variant="ghost"
-                                      className="size-6"
-                                      aria-label={`More actions for ${field.label}`}
-                                    >
-                                      <MoreHorizontal className="size-3.5" />
-                                    </Button>
-                                  }
-                                />
-                              }
-                            />
-                            <TooltipContent side="bottom">
-                              More actions
-                            </TooltipContent>
-                          </Tooltip>
-                          <DropdownMenuContent align="end" className="w-44">
-                            <DropdownMenuItem
-                              disabled={index === 0}
-                              onClick={() => onMoveLayer(field.id, "front")}
-                            >
-                              <ChevronsUp className="size-4 text-muted-foreground" />
-                              Bring to front
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              disabled={index === 0}
-                              onClick={() => onMoveLayer(field.id, "up")}
-                            >
-                              <ChevronUp className="size-4 text-muted-foreground" />
-                              Move up
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              disabled={index === fields.length - 1}
-                              onClick={() => onMoveLayer(field.id, "down")}
-                            >
-                              <ChevronDown className="size-4 text-muted-foreground" />
-                              Move down
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              disabled={index === fields.length - 1}
-                              onClick={() => onMoveLayer(field.id, "back")}
-                            >
-                              <ChevronsDown className="size-4 text-muted-foreground" />
-                              Send to back
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() =>
-                                onUpdateField(field.id, {
-                                  locked: !field.locked,
-                                })
-                              }
-                            >
-                              {field.locked ? (
-                                <Unlock className="size-4 text-muted-foreground" />
-                              ) : (
-                                <Lock className="size-4 text-muted-foreground" />
-                              )}
-                              {field.locked ? "Unlock layer" : "Lock layer"}
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-
-                        <Tooltip>
-                          <TooltipTrigger
-                            render={
-                              <Button
-                                type="button"
-                                size="icon"
-                                variant="ghost"
-                                className="size-6"
-                                aria-label={`Duplicate ${field.label}`}
-                                onClick={() => {
-                                  onDuplicateField(field.id);
-                                }}
-                              >
-                                <Copy className="size-3.5" />
-                              </Button>
-                            }
-                          />
-                          <TooltipContent side="bottom">
-                            Duplicate field
-                          </TooltipContent>
-                        </Tooltip>
-
-                        <Tooltip>
-                          <TooltipTrigger
-                            render={
-                              <Button
-                                type="button"
-                                size="icon"
-                                variant="ghost"
-                                className="size-6"
-                                aria-label={
-                                  field.visible
-                                    ? `Hide ${field.label}`
-                                    : `Show ${field.label}`
-                                }
-                                onClick={() => {
-                                  onSelectField(field.id);
-                                  onUpdateField(field.id, {
-                                    visible: !field.visible,
-                                  });
-                                }}
-                              >
-                                {field.visible ? (
-                                  <Eye className="size-3.5" />
-                                ) : (
-                                  <EyeOff className="size-3.5" />
-                                )}
-                              </Button>
-                            }
-                          />
-                          <TooltipContent side="bottom">
-                            {field.visible ? "Hide field" : "Show field"}
-                          </TooltipContent>
-                        </Tooltip>
-
-                        <Tooltip>
-                          <TooltipTrigger
-                            render={
-                              <Button
-                                type="button"
-                                size="icon"
-                                variant={
-                                  expandedFieldId === field.id
-                                    ? "default"
-                                    : "ghost"
-                                }
-                                className="size-6"
-                                aria-label={`Edit styling ${field.label}`}
-                                onClick={() => {
-                                  onSelectField(field.id);
-                                  setExpandedFieldId(
-                                    expandedFieldId === field.id
-                                      ? null
-                                      : field.id,
-                                  );
-                                }}
-                              >
-                                <Pencil className="size-3.5" />
-                              </Button>
-                            }
-                          />
-                          <TooltipContent side="bottom">
-                            Edit styling
-                          </TooltipContent>
-                        </Tooltip>
-                      </div>
-                    </div>
-
-                    {expandedFieldId === field.id && (
-                      <div className="border-t bg-card p-4">
-                        <FieldSettings
-                          field={field}
-                          onChange={(patch) => onUpdateField(field.id, patch)}
-                        />
-                        <div className="mt-6 flex justify-between gap-2 border-t pt-4">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setFieldToDelete(field)}
-                            className="h-8 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
-                          >
-                            <Trash2 className="mr-1.5 size-3" />
-                            Delete
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setExpandedFieldId(null)}
-                            className="h-8 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-                          >
-                            Collapse
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </TabsContent>
-
-          <TabsContent value="bulk" keepMounted className="m-0 p-4">
-            <BulkPanel
-              fields={fields}
-              rows={bulkRows}
-              previewIndex={bulkPreviewIndex}
-              filenameTemplate={filenameTemplate}
-              isGenerating={isGenerating}
-              onRowsChange={onBulkRowsChange}
-              onPreviewIndexChange={onBulkPreviewIndexChange}
-              onFilenameTemplateChange={onFilenameTemplateChange}
-              onGenerate={onGenerateBulk}
-            />
-          </TabsContent>
-        </div>
-      </Tabs>
-
-      <Dialog
-        open={!!fieldToDelete}
-        onOpenChange={(open) => !open && setFieldToDelete(null)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete Field</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete field{" "}
-              <strong>{fieldToDelete?.label}</strong>? This action cannot be
-              undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setFieldToDelete(null)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => {
-                if (fieldToDelete) {
-                  onRemoveField(fieldToDelete.id);
-                  setFieldToDelete(null);
-                }
-              }}
-            >
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </aside>
-  );
-}
-
-function PreviewField({
-  field,
-  pageSize,
-  previewSize,
-  canvasZoom,
-  selected,
-  dragging,
-  editing,
-  onSelect,
-  onEditStart,
-  onEditEnd,
-  onDragStart,
-  onDragEnd,
-  onResizeStart,
-  onMove,
-  onValueChange,
-  onImageChange,
-  onResize,
-  fields,
-}: {
-  field: CertificateField;
-  pageSize: PdfPageSize | null;
-  previewSize: PdfPageSize | null;
-  canvasZoom: number;
-  selected: boolean;
-  dragging: boolean;
-  editing: boolean;
-  onSelect: () => void;
-  onEditStart: () => void;
-  onEditEnd: () => void;
-  onDragStart: () => void;
-  onDragEnd: () => void;
-  onResizeStart: () => void;
-  onMove: (x: number, y: number) => void;
-  onValueChange: (value: string) => void;
-  onImageChange: (
-    patch: Pick<CertificateField, "imageDataUrl" | "imageMimeType" | "value">,
-  ) => void;
-  onResize: (width: number, height: number) => void;
-  fields: CertificateField[];
-}) {
-  const [activeGuides, setActiveGuides] = useState<{ x?: number; y?: number }>(
-    {},
-  );
-
-  // Auto Resize Calculation
-  const fontSize = useMemo(() => {
-    if (!pageSize || !previewSize) {
-      return field.fontSize;
-    }
-
-    const baseSize = (field.fontSize / pageSize.height) * previewSize.height;
-    if (!field.autoResize || field.type !== "text" || !field.width)
-      return baseSize;
-
-    const canvas = document.createElement("canvas");
-    const context = canvas.getContext("2d");
-    if (!context) return baseSize;
-
-    const previewFontWeightValue = previewFontWeight[field.fontWeight];
-    const previewWidth = (field.width / pageSize.width) * previewSize.width;
-    const minSize =
-      ((field.minFontSize ?? 8) / pageSize.height) * previewSize.height;
-
-    let currentSize = baseSize;
-    const lines = (field.value || field.label).split("\n");
-    const getLongestLineWidth = (size: number) => {
-      context.font = `${previewFontWeightValue} ${size}px ${getFontStack(field.fontFamily)}`;
-      return Math.max(
-        ...lines.map((line) => {
-          const metrics = context.measureText(line);
-          return (
-            metrics.width +
-            (line.length - 1) *
-              ((field.letterSpacing ?? 0) / pageSize.width) *
-              previewSize.width
-          );
-        }),
-      );
-    };
-
-    let currentMaxWidth = getLongestLineWidth(currentSize);
-    while (currentMaxWidth > previewWidth && currentSize > minSize) {
-      currentSize -= 0.5;
-      currentMaxWidth = getLongestLineWidth(currentSize);
-    }
-
-    return currentSize;
-  }, [
-    field.fontSize,
-    field.autoResize,
-    field.type,
-    field.width,
-    field.value,
-    field.label,
-    field.fontFamily,
-    field.fontWeight,
-    field.letterSpacing,
-    field.minFontSize,
-    pageSize,
-    previewSize,
-  ]);
-
-  if (!field.visible || !pageSize || !previewSize) {
-    return null;
-  }
-
-  const left = (field.x / pageSize.width) * previewSize.width;
-  const yOffset = field.type === "image" ? field.height : field.fontSize;
-  const top =
-    ((pageSize.height - field.y - yOffset) / pageSize.height) *
-    previewSize.height;
-  const width = (field.width / pageSize.width) * previewSize.width;
-  const height = (field.height / pageSize.height) * previewSize.height;
-
-  function handlePointerDown(event: React.PointerEvent<HTMLButtonElement>) {
-    if (!pageSize || !previewSize || field.locked) {
-      return;
-    }
-
-    event.preventDefault();
-    onSelect();
-    onDragStart();
-
-    const currentPageSize = pageSize;
-    const currentPreviewSize = previewSize;
-    const target = event.currentTarget;
-    const parent = target.parentElement;
-
-    if (!parent) {
-      return;
-    }
-
-    target.setPointerCapture(event.pointerId);
-
-    const parentRect = parent.getBoundingClientRect();
-    const targetRect = target.getBoundingClientRect();
-    const offsetX = (event.clientX - targetRect.left) / canvasZoom;
-    const offsetY = (event.clientY - targetRect.top) / canvasZoom;
-
-    function handlePointerMove(moveEvent: PointerEvent) {
-      const nextLeft =
-        (moveEvent.clientX - parentRect.left) / canvasZoom - offsetX;
-      const nextTop =
-        (moveEvent.clientY - parentRect.top) / canvasZoom - offsetY;
-      const maxLeft = currentPreviewSize.width - width;
-      const maxTop = currentPreviewSize.height - height;
-      const clampedLeft = Math.min(Math.max(0, nextLeft), Math.max(0, maxLeft));
-      const clampedTop = Math.min(Math.max(0, nextTop), Math.max(0, maxTop));
-      const nextX =
-        (clampedLeft / currentPreviewSize.width) * currentPageSize.width;
-      const nextY =
-        currentPageSize.height -
-        (clampedTop / currentPreviewSize.height) * currentPageSize.height -
-        yOffset;
-
-      // Snapping Logic
-      const SNAP_THRESHOLD = 6; // px in PDF units
-      let finalX = nextX;
-      let finalY = nextY;
-      let guideX: number | undefined;
-      let guideY: number | undefined;
-
-      // Snapping candidates
-      const xTargets = [
-        { val: 0, guide: 0 },
-        {
-          val: currentPageSize.width / 2 - field.width / 2,
-          guide: currentPageSize.width / 2,
-        },
-        {
-          val: currentPageSize.width - field.width,
-          guide: currentPageSize.width,
-        },
-      ];
-
-      const yTargets = [
-        { val: 0, guide: 0 },
-        {
-          val: currentPageSize.height / 2 - yOffset / 2,
-          guide: currentPageSize.height / 2,
-        },
-        {
-          val: currentPageSize.height - yOffset,
-          guide: currentPageSize.height,
-        },
-      ];
-
-      // Add other fields to targets
-      fields
-        .filter((f) => f.id !== field.id && f.visible)
-        .forEach((f) => {
-          const fYOffset = f.type === "image" ? f.height : f.fontSize;
-
-          // X Snapping
-          xTargets.push({ val: f.x, guide: f.x });
-          xTargets.push({
-            val: f.x + f.width - field.width,
-            guide: f.x + f.width,
-          });
-          xTargets.push({
-            val: f.x + f.width / 2 - field.width / 2,
-            guide: f.x + f.width / 2,
-          });
-
-          // Y Snapping
-          yTargets.push({ val: f.y, guide: f.y });
-          yTargets.push({
-            val: f.y + fYOffset - yOffset,
-            guide: f.y + fYOffset,
-          });
-          yTargets.push({
-            val: f.y + fYOffset / 2 - yOffset / 2,
-            guide: f.y + fYOffset / 2,
-          });
-        });
-
-      for (const target of xTargets) {
-        if (Math.abs(nextX - target.val) < SNAP_THRESHOLD) {
-          finalX = target.val;
-          guideX = target.guide;
-          break;
-        }
-      }
-
-      for (const target of yTargets) {
-        if (Math.abs(nextY - target.val) < SNAP_THRESHOLD) {
-          finalY = target.val;
-          guideY = target.guide;
-          break;
-        }
-      }
-
-      setActiveGuides({ x: guideX, y: guideY });
-      onMove(Math.round(finalX), Math.round(finalY));
-    }
-
-    function handlePointerUp() {
-      onDragEnd();
-      setActiveGuides({});
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-      window.removeEventListener("pointercancel", handlePointerUp);
-    }
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-    window.addEventListener("pointercancel", handlePointerUp);
-  }
-
-  function handleResizePointerDown(event: React.PointerEvent<HTMLSpanElement>) {
-    if (!pageSize || !previewSize || field.locked) {
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-    onSelect();
-    onResizeStart();
-
-    const currentPageSize = pageSize;
-    const currentPreviewSize = previewSize;
-    const startClientX = event.clientX;
-    const startClientY = event.clientY;
-    const startWidth = width;
-    const startHeight = height;
-    const minWidth = field.type === "image" ? 24 : Math.max(40, fontSize * 2);
-    const minHeight =
-      field.type === "image" ? 24 : Math.max(18, fontSize * 1.15);
-    const maxWidth = currentPreviewSize.width - left;
-    const maxHeight = currentPreviewSize.height - top;
-
-    function handlePointerMove(moveEvent: PointerEvent) {
-      const nextPreviewWidth = Math.min(
-        Math.max(
-          minWidth,
-          startWidth + (moveEvent.clientX - startClientX) / canvasZoom,
-        ),
-        maxWidth,
-      );
-      const nextPreviewHeight = Math.min(
-        Math.max(
-          minHeight,
-          startHeight + (moveEvent.clientY - startClientY) / canvasZoom,
-        ),
-        maxHeight,
-      );
-      const nextWidth =
-        (nextPreviewWidth / currentPreviewSize.width) * currentPageSize.width;
-      const nextHeight =
-        (nextPreviewHeight / currentPreviewSize.height) *
-        currentPageSize.height;
-
-      onResize(Math.round(nextWidth), Math.round(nextHeight));
-    }
-
-    function handlePointerUp() {
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-      window.removeEventListener("pointercancel", handlePointerUp);
-    }
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-    window.addEventListener("pointercancel", handlePointerUp);
-  }
-
-  return (
-    <button
-      type="button"
-      className={cn(
-        "absolute touch-none select-none border border-transparent bg-transparent px-1 text-left cursor-move",
-        field.type === "image" && "overflow-hidden",
-        field.locked && "cursor-default",
-        selected && "border-dashed border-primary bg-primary/10",
-        dragging && "border-solid border-primary bg-primary/20",
-      )}
-      style={{
-        left,
-        top,
-        width,
-        minHeight: height,
-        height: field.type === "text" ? "auto" : height,
-        color: field.color,
-        textAlign: field.alignment,
-        lineHeight: field.lineHeight ?? 1.25,
-        letterSpacing: field.letterSpacing
-          ? `${field.letterSpacing}px`
-          : "normal",
-        opacity: field.opacity ?? 1,
-        transform: field.rotate ? `rotate(${field.rotate}deg)` : "none",
-        textTransform: field.textTransform ?? "none",
-        textShadow: field.shadowColor
-          ? `${field.shadowOffsetX ?? 2}px ${field.shadowOffsetY ?? 2}px 0px ${field.shadowColor}${Math.round(
-              (field.shadowOpacity ?? 0.5) * 255,
-            )
-              .toString(16)
-              .padStart(2, "0")}`
-          : "none",
-        whiteSpace: "pre-wrap",
-        wordBreak: "break-word",
-      }}
-      onPointerDown={handlePointerDown}
-      onDoubleClick={(event) => {
-        event.stopPropagation();
-
-        if (field.type === "text" && !field.locked) {
-          onEditStart();
-        }
-      }}
-    >
-      {editing && field.type === "text" ? (
-        <input
-          autoFocus
-          className="h-full w-full bg-background/80 px-1 outline-none"
-          value={field.value}
-          style={{
-            color: field.color,
-            fontFamily: getFontStack(field.fontFamily),
-            fontWeight: previewFontWeight[field.fontWeight],
-            fontSize,
-            textAlign: field.alignment,
-            lineHeight: field.lineHeight ?? 1.25,
-            letterSpacing: field.letterSpacing
-              ? `${field.letterSpacing}px`
-              : "normal",
-            opacity: field.opacity ?? 1,
-            textTransform: field.textTransform ?? "none",
-            fontStyle: field.fontStyle ?? "normal",
-            textDecoration: field.textDecoration ?? "none",
-          }}
-          onChange={(event) => onValueChange(event.target.value)}
-          onBlur={onEditEnd}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === "Escape") {
-              event.currentTarget.blur();
-            }
-          }}
-          onPointerDown={(event) => event.stopPropagation()}
-          onDoubleClick={(event) => event.stopPropagation()}
-        />
-      ) : field.type === "image" ? (
-        field.imageDataUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={field.imageDataUrl}
-            alt={field.label}
-            className="h-full w-full object-contain"
-            draggable={false}
-          />
-        ) : (
-          <div
-            className="flex h-full flex-col items-center justify-center gap-1 text-[10px] text-muted-foreground"
-            onDragOver={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-            }}
-            onDrop={async (e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              const file = e.dataTransfer.files[0];
-              if (file && file.type.startsWith("image/")) {
-                const isPng =
-                  file.type === "image/png" ||
-                  file.name.toLowerCase().endsWith(".png");
-                onImageChange({
-                  imageDataUrl: await fileToDataUrl(file),
-                  imageMimeType: isPng ? "image/png" : "image/jpeg",
-                  value: file.name,
-                });
-              }
-            }}
-          >
-            <ImageIcon className="size-4 opacity-50" />
-            <span className="font-medium opacity-70">Drop Image Here</span>
-          </div>
-        )
-      ) : field.type === "shape" ? (
-        <div
-          className="h-full w-full"
-          style={{
-            backgroundColor:
-              field.shapeType === "line"
-                ? field.strokeColor
-                : field.fillColor,
-            borderStyle:
-              field.strokeWidth &&
-              field.strokeColor &&
-              field.shapeType !== "line"
-                ? "solid"
-                : undefined,
-            borderWidth:
-              field.strokeWidth &&
-              field.strokeColor &&
-              field.shapeType !== "line"
-                ? `${(field.strokeWidth / pageSize.height) * previewSize.height}px`
-                : undefined,
-            borderColor:
-              field.strokeWidth &&
-              field.strokeColor &&
-              field.shapeType !== "line"
-                ? field.strokeColor
-                : undefined,
-            borderRadius:
-              field.shapeType === "circle"
-                ? "50%"
-                : `${((field.borderRadius ?? 0) / pageSize.height) * previewSize.height}px`,
-            height:
-              field.shapeType === "line"
-                ? `${((field.strokeWidth ?? 2) / pageSize.height) * previewSize.height}px`
-                : "100%",
-          }}
-        />
-      ) : (
-        <span
-          className="block"
-          style={{
-            fontFamily: getFontStack(field.fontFamily),
-            fontWeight: previewFontWeight[field.fontWeight],
-            fontSize,
-            textAlign: field.alignment,
-            lineHeight: field.lineHeight ?? 1.25,
-            letterSpacing: field.letterSpacing
-              ? `${field.letterSpacing}px`
-              : "normal",
-            opacity: field.opacity ?? 1,
-            textTransform: field.textTransform ?? "none",
-            fontStyle: field.fontStyle ?? "normal",
-            textDecoration: field.textDecoration ?? "none",
-          }}
-        >
-          {field.value || field.label}
-        </span>
-      )}
-      {selected && !field.locked ? (
-        <>
-          <div className="absolute -top-7 left-0 z-50 flex h-6 w-max whitespace-nowrap items-center gap-2 rounded-full bg-popover px-2.5 py-1 text-[10px] font-bold font-sans text-popover-foreground shadow-sm ring-1 ring-border transition-all duration-300">
-            <span className="text-[9px] font-black text-muted-foreground uppercase tracking-tighter">
-              W
-            </span>
-            <span className="tabular-nums">{Math.round(field.width)}</span>
-            <div className="mx-0.5 h-2 w-px bg-border" />
-            <span className="text-[9px] font-black text-muted-foreground uppercase tracking-tighter">
-              H
-            </span>
-            <span className="tabular-nums">{Math.round(field.height)}</span>
-          </div>
-          <span
-            aria-hidden="true"
-            className="absolute bottom-0 right-0 size-3 cursor-se-resize border-b-2 border-r-2 border-primary bg-background"
-            onPointerDown={handleResizePointerDown}
-          />
-        </>
-      ) : null}
-
-      {/* Visual Guidelines */}
-      {dragging && activeGuides.x !== undefined && (
-        <div
-          className="pointer-events-none absolute z-[100] border-l border-primary/50"
-          style={{
-            left: (activeGuides.x / pageSize.width) * previewSize.width - left,
-            top: -top,
-            height: previewSize.height,
-            width: 0,
-          }}
-        />
-      )}
-      {dragging && activeGuides.y !== undefined && (
-        <div
-          className="pointer-events-none absolute z-[100] border-t border-primary/50"
-          style={{
-            left: -left,
-            top:
-              ((pageSize.height - activeGuides.y) / pageSize.height) *
-                previewSize.height -
-              top,
-            width: previewSize.width,
-            height: 0,
-          }}
-        />
-      )}
-    </button>
-  );
-}
-
-function GoogleFontSelect({
-  value,
-  onChange,
-}: {
-  value: CertificateFieldFont;
-  onChange: (fontFamily: CertificateFieldFont) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-
-  const filteredGroups = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-
-    return certificateFontGroups
-      .map((group) => ({
-        ...group,
-        fonts: normalizedQuery
-          ? group.fonts.filter((font) =>
-              font.toLowerCase().includes(normalizedQuery),
-            )
-          : group.fonts,
-      }))
-      .filter((group) => group.fonts.length > 0);
-  }, [query]);
-
-  const visibleFonts = filteredGroups.flatMap((group) => group.fonts);
-  const fontLoadVersion = useGoogleFontLoader([value, ...visibleFonts]);
-
-  return (
-    <div className="relative">
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger className="group relative flex w-full items-center gap-0 overflow-hidden rounded-md border text-left transition-colors hover:bg-muted/50 focus-visible:ring-1 focus-visible:ring-primary outline-none">
-          <div className="flex h-10 flex-1 items-center px-3 py-2">
-            <span
-              className="truncate text-sm"
-              style={{ fontFamily: getFontStack(value) }}
-            >
-              {value}
-            </span>
-          </div>
-          <div className="flex h-10 w-8 shrink-0 items-center justify-center border-l bg-muted/30 group-hover:bg-muted transition-colors">
-            <ChevronDown className="size-3 text-muted-foreground" />
-          </div>
-        </PopoverTrigger>
-        <PopoverContent
-          className="w-[var(--radix-popover-trigger-width)] p-2 shadow-2xl"
-          align="start"
-          sideOffset={4}
-        >
-          <div className="relative mb-2">
-            <Search className="pointer-events-none absolute left-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              id="field-font-search"
-              value={query}
-              placeholder="Search font..."
-              className="h-8 pl-7 text-xs"
-              autoFocus
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </div>
-          <div className="max-h-64 overflow-auto pr-1">
-            {filteredGroups.map((group) => (
-              <div
-                key={`${group.label}-${fontLoadVersion}`}
-                className="mb-3 last:mb-0"
-              >
-                <p className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                  {group.label}
-                </p>
-                {group.fonts.map((font) => (
-                  <button
-                    key={font}
-                    type="button"
-                    className={cn(
-                      "flex w-full items-center justify-between rounded px-2 py-1.5 text-left transition-colors hover:bg-accent",
-                      font === value && "bg-accent text-accent-foreground",
-                    )}
-                    onClick={() => {
-                      onChange(font);
-                      setOpen(false);
-                      setQuery("");
-                    }}
-                  >
-                    <span
-                      className="truncate text-base"
-                      style={{ fontFamily: getFontStack(font) }}
-                    >
-                      {font}
-                    </span>
-                    {font === value ? <Check className="size-3" /> : null}
-                  </button>
-                ))}
-              </div>
-            ))}
-            {!filteredGroups.length ? (
-              <div className="px-2 py-6 text-center text-xs text-muted-foreground">
-                No fonts found.
-              </div>
-            ) : null}
-          </div>
-        </PopoverContent>
-      </Popover>
-    </div>
-  );
-}
-
-function ImageUploadInput({
-  id,
-  onChange,
-}: {
-  id: string;
-  onChange: (patch: Partial<CertificateField>) => void;
-}) {
-  const [isDragOver, setIsDragOver] = useState(false);
-
-  async function handleImage(file: File | null) {
-    if (!file) {
-      return;
-    }
-
-    const isPng =
-      file.type === "image/png" || file.name.toLowerCase().endsWith(".png");
-    const isJpeg =
-      file.type === "image/jpeg" ||
-      file.name.toLowerCase().endsWith(".jpg") ||
-      file.name.toLowerCase().endsWith(".jpeg");
-
-    if (!isPng && !isJpeg) {
-      return;
-    }
-
-    onChange({
-      imageDataUrl: await fileToDataUrl(file),
-      imageMimeType: isPng ? "image/png" : "image/jpeg",
-      value: file.name,
-    });
-  }
-
-  return (
-    <div
-      className={cn(
-        "relative flex h-24 cursor-pointer flex-col items-center justify-center gap-2 rounded-md border border-dashed text-muted-foreground transition-all",
-        isDragOver
-          ? "border-primary bg-primary/5 text-primary"
-          : "hover:border-primary hover:bg-muted/50",
-      )}
-      onDragOver={(e) => {
-        e.preventDefault();
-        setIsDragOver(true);
-      }}
-      onDragLeave={() => setIsDragOver(false)}
-      onDrop={(e) => {
-        e.preventDefault();
-        setIsDragOver(false);
-        void handleImage(e.dataTransfer.files[0]);
-      }}
-    >
-      <div className="flex flex-col items-center gap-1.5 p-4 text-center">
-        <FileUp
-          className={cn(
-            "size-5 transition-transform",
-            isDragOver && "scale-110",
-          )}
-        />
-        <div className="space-y-0.5">
-          <p className="text-[10px] font-medium">Drop image here</p>
-          <p className="text-[9px] opacity-60">or click to browse (PNG, JPG)</p>
-        </div>
-      </div>
-      <input
-        id={id}
-        type="file"
-        accept="image/png,image/jpeg"
-        className="absolute inset-0 cursor-pointer opacity-0"
-        onChange={(event) => void handleImage(event.target.files?.[0] ?? null)}
-      />
-    </div>
-  );
-}
-
-function BulkPanel({
-  fields,
-  rows,
-  previewIndex,
-  filenameTemplate,
-  isGenerating,
-  onRowsChange,
-  onPreviewIndexChange,
-  onFilenameTemplateChange,
-  onGenerate,
-}: {
-  fields: CertificateField[];
-  rows: BulkRow[];
-  previewIndex: number;
-  filenameTemplate: string;
-  isGenerating: boolean;
-  onRowsChange: (rows: BulkRow[]) => void;
-  onPreviewIndexChange: (index: number) => void;
-  onFilenameTemplateChange: (value: string) => void;
-  onGenerate: (type: "pdf" | "jpg") => void;
-}) {
-  const [isDragOver, setIsDragOver] = useState(false);
-  const textFields = fields.filter((field) => field.type === "text");
-  const headers = rows[0] ? Object.keys(rows[0]) : [];
-  const mappedCount = textFields.filter((field) =>
-    headers.includes(field.label),
-  ).length;
-  const isUploaded = rows.length > 0;
-
-  function handleCsv(file: File | null) {
-    if (!file) {
-      return;
-    }
-
-    Papa.parse<BulkRow>(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (result) => {
-        const parsedRows = result.data.filter((row) =>
-          Object.values(row).some((value) => String(value ?? "").trim()),
-        );
-        onRowsChange(parsedRows);
-      },
-    });
-  }
-
-  function handleDrop(event: React.DragEvent<HTMLElement>) {
-    event.preventDefault();
-    setIsDragOver(false);
-    const file = event.dataTransfer.files[0];
-
-    if (
-      file?.type === "text/csv" ||
-      file?.name.toLowerCase().endsWith(".csv")
-    ) {
-      handleCsv(file);
-    }
-  }
-
-  function handleDragOver(event: React.DragEvent<HTMLElement>) {
-    event.preventDefault();
-    setIsDragOver(true);
-  }
-
-  function handleDragLeave(event: React.DragEvent<HTMLElement>) {
-    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-      setIsDragOver(false);
-    }
-  }
-
-  return (
-    <div className="space-y-5">
-      <div>
-        <h3 className="text-sm font-semibold">Bulk Generate</h3>
-        <p className="text-xs text-muted-foreground">
-          Upload CSV with headers matching field labels.
-        </p>
-      </div>
-
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <Label className="text-xs text-muted-foreground">CSV Data</Label>
-          {isUploaded && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => onRowsChange([])}
-              className="h-6 text-[10px] text-destructive hover:bg-destructive/10"
-            >
-              Remove
-            </Button>
-          )}
-        </div>
-        <div
-          className={cn(
-            "relative flex flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed p-6 text-center transition-colors",
-            isDragOver
-              ? "border-primary bg-primary/5"
-              : isUploaded
-                ? "border-primary/30 bg-primary/5"
-                : "border-border bg-muted/30",
-          )}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
-        >
-          {isUploaded && !isDragOver ? (
-            <CheckCircle2 className="size-8 text-primary" />
-          ) : (
-            <FileUp
-              className={cn(
-                "size-8 transition-colors",
-                isDragOver ? "text-foreground" : "text-muted-foreground",
-              )}
-            />
-          )}
-          <div className="space-y-1">
-            <p className="text-sm font-medium">
-              {isUploaded && !isDragOver ? "CSV Loaded" : "Drop CSV here"}
-            </p>
-            <p className="text-[10px] text-muted-foreground">
-              {isUploaded && !isDragOver
-                ? `${rows.length} rows detected`
-                : "or click to browse"}
-            </p>
-          </div>
-          <Label htmlFor="bulk-csv" className="absolute inset-0 cursor-pointer">
-            <span className="sr-only">Upload CSV</span>
-          </Label>
-          <Input
-            id="bulk-csv"
-            type="file"
-            accept=".csv,text/csv"
-            className="hidden"
-            onChange={(event) => handleCsv(event.target.files?.[0] ?? null)}
-          />
-        </div>
-      </div>
-
-      <div className="rounded-md border bg-muted/50 p-3 text-sm transition-colors">
-        <p className="text-xs font-medium">{rows.length} rows</p>
-        <p className="mt-1 text-[10px] text-muted-foreground">
-          {mappedCount} of {textFields.length} fields mapped.
-        </p>
-      </div>
-
-      {headers.length ? (
-        <div className="space-y-2">
-          <Label className="text-xs text-muted-foreground">
-            Detected Headers
-          </Label>
-          <div className="flex flex-wrap gap-1">
-            {headers.map((header) => (
-              <span
-                key={header}
-                className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground border"
-              >
-                {header}
-              </span>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      {rows.length ? (
-        <>
-          <div className="space-y-2">
-            <Label
-              htmlFor="bulk-preview-row"
-              className="text-xs text-muted-foreground"
-            >
-              Preview Row
-            </Label>
-            <div className="flex items-center gap-1.5">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="size-8 shrink-0 bg-muted hover:bg-accent"
-                disabled={previewIndex <= 0}
-                onClick={() => onPreviewIndexChange(previewIndex - 1)}
-              >
-                <ChevronLeft className="size-4 text-muted-foreground" />
-              </Button>
-              <Input
-                id="bulk-preview-row"
-                type="number"
-                min={1}
-                max={rows.length}
-                value={previewIndex + 1}
-                className="h-8 text-center text-xs"
-                onChange={(e) => {
-                  const val = parseInt(e.target.value, 10);
-                  if (!isNaN(val)) {
-                    onPreviewIndexChange(
-                      Math.min(Math.max(0, val - 1), rows.length - 1),
-                    );
-                  }
-                }}
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="size-8 shrink-0 bg-muted hover:bg-accent"
-                disabled={previewIndex >= rows.length - 1}
-                onClick={() => onPreviewIndexChange(previewIndex + 1)}
-              >
-                <ChevronRight className="size-4 text-muted-foreground" />
-              </Button>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label
-              htmlFor="bulk-filename"
-              className="text-xs text-muted-foreground"
-            >
-              Filename Pattern
-            </Label>
-            <Input
-              id="bulk-filename"
-              value={filenameTemplate}
-              className="h-8 text-xs"
-              onChange={(event) => onFilenameTemplateChange(event.target.value)}
-            />
-            <p className="text-[10px] text-muted-foreground italic">
-              Use {"{row}"} or headers like {"{Name}"}.
-            </p>
-          </div>
-
-          <div className="grid gap-2">
-            <Button
-              variant="outline"
-              className="w-full"
-              onClick={() => onGenerate("pdf")}
-              disabled={isGenerating}
-            >
-              <FileText className="size-4" />
-              {isGenerating ? "ZIP..." : "Download as PDF"}
-            </Button>
-            <Button
-              variant="outline"
-              className="w-full"
-              onClick={() => onGenerate("jpg")}
-              disabled={isGenerating}
-            >
-              <ImageIcon className="size-4" />
-              {isGenerating ? "ZIP..." : "Download as JPG"}
-            </Button>
-          </div>
-        </>
-      ) : null}
-    </div>
-  );
-}
-
-function FieldSettings({
-  field,
-  onChange,
-}: {
-  field: CertificateField;
-  onChange: (patch: Partial<CertificateField>) => void;
-}) {
-  useGoogleFontLoader([field.fontFamily]);
-
-  return (
-    <section className="space-y-5">
-      <div className="grid gap-2">
-        <Label htmlFor="field-label" className="text-xs text-muted-foreground">
-          Label
-        </Label>
-        <Input
-          id="field-label"
-          value={field.label}
-          className="h-8 text-xs"
-          onChange={(event) => onChange({ label: event.target.value })}
-        />
-      </div>
-
-      {field.type === "image" ? (
-        <div className="grid gap-2">
-          <Label
-            htmlFor="field-image"
-            className="text-xs text-muted-foreground"
-          >
-            Image
-          </Label>
-          <ImageUploadInput id="field-image" onChange={onChange} />
-          {field.imageDataUrl && (
-            <div className="rounded-md border bg-muted/20 p-2 transition-colors">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={field.imageDataUrl}
-                alt={field.label}
-                className="max-h-24 w-full object-contain"
-              />
-            </div>
-          )}
-        </div>
-      ) : field.type === "shape" ? (
-        <div className="grid grid-cols-2 gap-4">
-          <div className="grid gap-2">
-            <div className="flex items-center justify-between">
-              <Label className="text-xs text-muted-foreground">
-                Fill Color
-              </Label>
-              {field.fillColor && (
-                <button
-                  className="text-[10px] text-muted-foreground hover:text-destructive transition-colors"
-                  onClick={() => onChange({ fillColor: "" })}
-                >
-                  None
-                </button>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <div className="relative h-8 w-full overflow-hidden rounded-md border shadow-sm transition-colors hover:border-primary">
-                {field.fillColor ? (
-                  <>
-                    <Input
-                      type="color"
-                      value={field.fillColor}
-                      className="absolute inset-0 h-full w-full cursor-pointer border-none bg-transparent p-0 opacity-0"
-                      onChange={(event) =>
-                        onChange({ fillColor: event.target.value })
-                      }
-                      disabled={field.shapeType === "line"}
-                    />
-                    <div
-                      className={cn(
-                        "h-full w-full",
-                        field.shapeType === "line" && "bg-muted opacity-50",
-                      )}
-                      style={{
-                        backgroundColor:
-                          field.shapeType === "line"
-                            ? undefined
-                            : field.fillColor,
-                      }}
-                    />
-                  </>
-                ) : (
-                  <button
-                    className="flex h-full w-full items-center justify-center bg-muted/30 text-[10px] text-muted-foreground hover:bg-muted/50 transition-all"
-                    onClick={() => onChange({ fillColor: "#ffffff" })}
-                  >
-                    Transparent
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-          <div className="grid gap-2">
-            <div className="flex items-center justify-between">
-              <Label className="text-xs text-muted-foreground">
-                Stroke Color
-              </Label>
-              {field.strokeColor && (
-                <button
-                  className="text-[10px] text-muted-foreground hover:text-destructive transition-colors"
-                  onClick={() => onChange({ strokeColor: "" })}
-                >
-                  None
-                </button>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <div className="relative h-8 w-full overflow-hidden rounded-md border shadow-sm transition-colors hover:border-primary">
-                {field.strokeColor ? (
-                  <>
-                    <Input
-                      type="color"
-                      value={field.strokeColor}
-                      className="absolute inset-0 h-full w-full cursor-pointer border-none bg-transparent p-0 opacity-0"
-                      onChange={(event) =>
-                        onChange({ strokeColor: event.target.value })
-                      }
-                    />
-                    <div
-                      className="h-full w-full"
-                      style={{ backgroundColor: field.strokeColor }}
-                    />
-                  </>
-                ) : (
-                  <button
-                    className="flex h-full w-full items-center justify-center bg-muted/30 text-[10px] text-muted-foreground hover:bg-muted/50 transition-all"
-                    onClick={() => onChange({ strokeColor: "#000000" })}
-                  >
-                    None
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="grid gap-2">
-          <Label
-            htmlFor="field-value"
-            className="text-xs text-muted-foreground"
-          >
-            Content
-          </Label>
-          <Textarea
-            id="field-value"
-            value={field.value}
-            className="min-h-20 text-xs resize-none"
-            placeholder="Type content here... (Shift+Enter for a new line)"
-            onChange={(event) => onChange({ value: event.target.value })}
-          />
-        </div>
-      )}
-
-      <div className="grid grid-cols-2 gap-x-3 gap-y-2">
-        <NumberInput
-          label="X"
-          value={field.x}
-          onChange={(x) => onChange({ x })}
-        />
-        <NumberInput
-          label="Y"
-          value={field.y}
-          onChange={(y) => onChange({ y })}
-        />
-        <NumberInput
-          label="W"
-          value={field.width}
-          onChange={(width) => onChange({ width })}
-        />
-        <NumberInput
-          label="H"
-          value={field.height}
-          onChange={(height) => onChange({ height })}
-        />
-      </div>
-
-      {field.type === "shape" && (
-        <div className="grid grid-cols-2 gap-4">
-          <div className="grid gap-2">
-            <Label className="text-xs text-muted-foreground">
-              Stroke Width
-            </Label>
-            <NumberInput
-              label="Px"
-              value={field.strokeWidth ?? 1}
-              onChange={(val) => onChange({ strokeWidth: val })}
-            />
-          </div>
-          {field.shapeType === "rectangle" && (
-            <div className="grid gap-2">
-              <Label className="text-xs text-muted-foreground">Radius</Label>
-              <NumberInput
-                label="Px"
-                value={field.borderRadius ?? 0}
-                onChange={(val) => onChange({ borderRadius: val })}
-              />
-            </div>
-          )}
-        </div>
-      )}
-
-      {field.type === "text" && (
-        <div className="space-y-4 pt-2">
-          <Separator className="opacity-50" />
-
-          <div className="grid gap-4">
-            <div className="grid gap-2">
-              <Label className="text-xs text-muted-foreground">Font</Label>
-              <GoogleFontSelect
-                value={field.fontFamily}
-                onChange={(fontFamily) => onChange({ fontFamily })}
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-2">
-                <Label className="text-xs text-muted-foreground">Size</Label>
-                <div className="group relative flex items-center gap-0 overflow-hidden rounded-md border transition-colors focus-within:border-primary">
-                  <div className="flex h-8 w-9 shrink-0 items-center justify-center border-r bg-muted text-[10px] font-bold text-muted-foreground select-none group-focus-within:text-foreground transition-colors">
-                    Px
-                  </div>
-                  <input
-                    type="number"
-                    value={Math.round(field.fontSize)}
-                    className="h-8 w-full bg-background px-2 text-xs font-medium text-foreground outline-none transition-colors [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                    onChange={(e) =>
-                      onChange({ fontSize: Number(e.target.value) })
-                    }
-                  />
-                  <DropdownMenu>
-                    <DropdownMenuTrigger className="flex h-8 w-7 shrink-0 items-center justify-center border-l bg-muted/30 hover:bg-muted transition-colors">
-                      <ChevronDown className="size-3 text-muted-foreground" />
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-20 min-w-0">
-                      {[
-                        10, 11, 12, 13, 14, 15, 16, 20, 24, 32, 36, 40, 48, 64,
-                        96, 128,
-                      ].map((size) => (
-                        <DropdownMenuItem
-                          key={size}
-                          className={cn(
-                            "text-xs",
-                            field.fontSize === size && "bg-accent font-bold",
-                          )}
-                          onClick={() => onChange({ fontSize: size })}
-                        >
-                          {size}
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
-
-              <div className="grid gap-2">
-                <Label className="text-xs text-muted-foreground">Color</Label>
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <Input
-                      id="field-color-hex"
-                      value={field.color}
-                      className="h-8 pl-5 text-[11px] font-mono uppercase"
-                      onChange={(event) =>
-                        onChange({ color: event.target.value })
-                      }
-                    />
-                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">
-                      #
-                    </span>
-                  </div>
-                  <div className="relative h-8 w-10 shrink-0 overflow-hidden rounded-md border shadow-sm transition-colors hover:border-primary">
-                    <Input
-                      type="color"
-                      value={field.color}
-                      className="absolute inset-0 h-full w-full cursor-pointer border-none bg-transparent p-0 opacity-0"
-                      onChange={(event) =>
-                        onChange({ color: event.target.value })
-                      }
-                    />
-                    <div
-                      className="h-full w-full"
-                      style={{ backgroundColor: field.color }}
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label
-                  htmlFor="field-font-weight"
-                  className="text-xs text-muted-foreground"
-                >
-                  Weight
-                </Label>
-                <DropdownMenu>
-                  <DropdownMenuTrigger className="group relative flex w-full items-center gap-0 overflow-hidden rounded-md border text-left transition-colors hover:bg-muted/50 focus-visible:ring-1 focus-visible:ring-primary outline-none">
-                    <div className="flex h-8 flex-1 items-center px-2.5 text-xs font-medium text-foreground">
-                      <span className="capitalize">{field.fontWeight}</span>
-                    </div>
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center border-l bg-muted/30 group-hover:bg-muted transition-colors">
-                      <ChevronDown className="size-3 text-muted-foreground" />
-                    </div>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-32 min-w-0">
-                    {(["regular", "medium", "semibold", "bold"] as const).map(
-                      (weight) => (
-                        <DropdownMenuItem
-                          key={weight}
-                          className={cn(
-                            "text-xs capitalize",
-                            field.fontWeight === weight &&
-                              "bg-accent font-bold",
-                          )}
-                          onClick={() => onChange({ fontWeight: weight })}
-                        >
-                          {weight}
-                        </DropdownMenuItem>
-                      ),
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-
-              <div className="grid gap-2">
-                <Label className="text-xs text-muted-foreground">
-                  Alignment
-                </Label>
-                <div className="grid grid-cols-3 gap-1 rounded-md bg-muted/50 p-1">
-                  {[
-                    ["left", AlignLeft],
-                    ["center", AlignCenter],
-                    ["right", AlignRight],
-                  ].map(([value, Icon]) => (
-                    <button
-                      key={value as string}
-                      type="button"
-                      className={cn(
-                        "flex items-center justify-center rounded px-1 py-1.5 transition-all",
-                        field.alignment === value
-                          ? "bg-background text-foreground shadow-sm"
-                          : "text-muted-foreground hover:text-foreground",
-                      )}
-                      onClick={() =>
-                        onChange({
-                          alignment: value as CertificateFieldAlignment,
-                        })
-                      }
-                    >
-                      <Icon className="size-3.5" />
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="grid gap-2">
-              <Label className="text-xs text-muted-foreground">
-                Text Effects
-              </Label>
-              <div className="flex gap-1 rounded-md bg-muted/50 p-1">
-                {[
-                  {
-                    id: "bold",
-                    icon: Bold,
-                    active: field.fontWeight === "bold",
-                    onClick: () =>
-                      onChange({
-                        fontWeight:
-                          field.fontWeight === "bold" ? "regular" : "bold",
-                      }),
-                  },
-                  {
-                    id: "italic",
-                    icon: Italic,
-                    active: field.fontStyle === "italic",
-                    onClick: () =>
-                      onChange({
-                        fontStyle:
-                          field.fontStyle === "italic" ? "normal" : "italic",
-                      }),
-                  },
-                  {
-                    id: "underline",
-                    icon: Underline,
-                    active: field.textDecoration === "underline",
-                    onClick: () =>
-                      onChange({
-                        textDecoration:
-                          field.textDecoration === "underline"
-                            ? "none"
-                            : "underline",
-                      }),
-                  },
-                  {
-                    id: "strikethrough",
-                    icon: Strikethrough,
-                    active: field.textDecoration === "line-through",
-                    onClick: () =>
-                      onChange({
-                        textDecoration:
-                          field.textDecoration === "line-through"
-                            ? "none"
-                            : "line-through",
-                      }),
-                  },
-                ].map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className={cn(
-                      "flex flex-1 items-center justify-center rounded py-1.5 transition-all",
-                      item.active
-                        ? "bg-background text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground",
-                    )}
-                    onClick={item.onClick}
-                  >
-                    <item.icon className="size-3.5" />
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label className="text-xs text-muted-foreground">
-                  Auto Resize
-                </Label>
-                <div className="flex h-8 items-center justify-between rounded-md border bg-muted/20 px-2.5">
-                  <span className="text-[10px] font-medium text-muted-foreground">
-                    {field.autoResize ? "On" : "Off"}
-                  </span>
-                  <Switch
-                    checked={field.autoResize ?? false}
-                    onCheckedChange={(checked) =>
-                      onChange({ autoResize: checked })
-                    }
-                    className="scale-75 origin-right"
-                  />
-                </div>
-              </div>
-
-              {field.autoResize && (
-                <div className="grid gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
-                  <Label className="text-xs text-muted-foreground">
-                    Min Size
-                  </Label>
-                  <NumberInput
-                    label="Px"
-                    value={field.minFontSize ?? 8}
-                    onChange={(val) => onChange({ minFontSize: val })}
-                  />
-                </div>
-              )}
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label className="text-xs text-muted-foreground">Opacity</Label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.1"
-                    value={field.opacity ?? 1}
-                    className="h-4 flex-1 cursor-pointer accent-primary"
-                    onChange={(e) =>
-                      onChange({ opacity: Number(e.target.value) })
-                    }
-                  />
-                  <span className="w-8 text-[10px] font-mono">
-                    {(field.opacity ?? 1).toFixed(1)}
-                  </span>
-                </div>
-              </div>
-
-              <div className="grid gap-2">
-                <Label className="text-xs text-muted-foreground">
-                  Rotation
-                </Label>
-                <div className="group relative flex items-center gap-0 overflow-hidden rounded-md border transition-colors focus-within:border-primary">
-                  <div className="flex h-8 w-7 shrink-0 items-center justify-center border-r bg-muted text-[10px] font-bold text-muted-foreground select-none group-focus-within:text-foreground transition-colors">
-                    <RotateCw className="size-3" />
-                  </div>
-                  <input
-                    type="number"
-                    value={field.rotate ?? 0}
-                    className="h-8 w-full bg-background px-2 text-xs font-medium text-foreground outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none transition-colors"
-                    onChange={(e) =>
-                      onChange({ rotate: Number(e.target.value) })
-                    }
-                  />
-                  <div className="flex h-8 w-6 shrink-0 items-center justify-center text-[10px] text-muted-foreground">
-                    °
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label className="text-xs text-muted-foreground">
-                  Letter Spacing
-                </Label>
-                <NumberInput
-                  label="Px"
-                  value={field.letterSpacing ?? 0}
-                  onChange={(val) => onChange({ letterSpacing: val })}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label className="text-xs text-muted-foreground">
-                  Line Height
-                </Label>
-                <NumberInput
-                  label="Em"
-                  value={field.lineHeight ?? 1.25}
-                  onChange={(val) => onChange({ lineHeight: val })}
-                />
-              </div>
-            </div>
-
-            <div className="grid gap-2">
-              <Label className="text-xs text-muted-foreground">
-                Text Transform
-              </Label>
-              <div className="grid grid-cols-4 gap-1 rounded-md bg-muted/50 p-1">
-                {[
-                  { value: "none", label: "Ab", title: "None" },
-                  { value: "uppercase", label: "AA", title: "Uppercase" },
-                  { value: "lowercase", label: "aa", title: "Lowercase" },
-                  { value: "capitalize", label: "Aa", title: "Capitalize" },
-                ].map((item) => (
-                  <Tooltip key={item.value}>
-                    <TooltipTrigger
-                      render={
-                        <button
-                          type="button"
-                          className={cn(
-                            "flex h-7 items-center justify-center rounded px-1 transition-all",
-                            (field.textTransform ?? "none") === item.value
-                              ? "bg-background text-foreground shadow-sm font-bold"
-                              : "text-muted-foreground hover:text-foreground",
-                          )}
-                          onClick={() =>
-                            onChange({
-                              textTransform:
-                                item.value as CertificateField["textTransform"],
-                            })
-                          }
-                        >
-                          <span className="text-[11px] font-medium">
-                            {item.label}
-                          </span>
-                        </button>
-                      }
-                    >
-                      {item.title}
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" className="text-[10px]">
-                      {item.title}
-                    </TooltipContent>
-                  </Tooltip>
-                ))}
-              </div>
-            </div>
-
-            <Separator className="my-2 opacity-50" />
-
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs font-semibold">Shadow</Label>
-                <Switch
-                  checked={!!field.shadowColor}
-                  onCheckedChange={(checked) =>
-                    onChange({ shadowColor: checked ? "#000000" : "" })
-                  }
-                />
-              </div>
-
-              {field.shadowColor !== undefined && field.shadowColor !== "" && (
-                <div className="space-y-4 rounded-md border bg-muted/20 p-3 animate-in fade-in slide-in-from-top-2">
-                  <div className="grid gap-2">
-                    <Label className="text-xs text-muted-foreground">
-                      Shadow Color
-                    </Label>
-                    <div className="flex gap-2">
-                      <div className="relative flex-1">
-                        <Input
-                          value={field.shadowColor}
-                          className="h-8 pl-5 text-[11px] font-mono uppercase"
-                          onChange={(event) =>
-                            onChange({ shadowColor: event.target.value })
-                          }
-                        />
-                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">
-                          #
-                        </span>
-                      </div>
-                      <div className="relative h-8 w-10 shrink-0 overflow-hidden rounded-md border">
-                        <Input
-                          type="color"
-                          value={field.shadowColor}
-                          className="absolute inset-0 h-full w-full cursor-pointer border-none bg-transparent p-0 opacity-0"
-                          onChange={(event) =>
-                            onChange({ shadowColor: event.target.value })
-                          }
-                        />
-                        <div
-                          className="h-full w-full"
-                          style={{ backgroundColor: field.shadowColor }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="grid gap-2">
-                      <Label className="text-xs text-muted-foreground">
-                        Offset X
-                      </Label>
-                      <NumberInput
-                        label="X"
-                        value={field.shadowOffsetX ?? 2}
-                        onChange={(val) => onChange({ shadowOffsetX: val })}
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label className="text-xs text-muted-foreground">
-                        Offset Y
-                      </Label>
-                      <NumberInput
-                        label="Y"
-                        value={field.shadowOffsetY ?? 2}
-                        onChange={(val) => onChange({ shadowOffsetY: val })}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label className="text-xs text-muted-foreground">
-                      Shadow Opacity
-                    </Label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="range"
-                        min="0"
-                        max="1"
-                        step="0.1"
-                        value={field.shadowOpacity ?? 0.5}
-                        className="h-4 flex-1 cursor-pointer accent-primary"
-                        onChange={(e) =>
-                          onChange({ shadowOpacity: Number(e.target.value) })
-                        }
-                      />
-                      <span className="w-8 text-[10px] font-mono">
-                        {(field.shadowOpacity ?? 0.5).toFixed(1)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </section>
-  );
-}
-
-function NumberInput({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  onChange: (value: number) => void;
-}) {
-  return (
-    <div className="group relative flex items-center gap-0 overflow-hidden rounded-md border transition-colors focus-within:border-primary">
-      <div className="flex h-8 w-7 shrink-0 items-center justify-center border-r bg-muted text-[10px] font-bold text-muted-foreground select-none group-focus-within:text-foreground transition-colors">
-        {label}
-      </div>
-      <input
-        type="number"
-        value={Math.round(value)}
-        className="h-8 w-full bg-background px-2 text-xs font-medium text-foreground outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none transition-colors"
-        onChange={(e) => onChange(Number(e.target.value))}
-      />
-    </div>
-  );
-}

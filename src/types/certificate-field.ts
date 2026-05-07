@@ -44,7 +44,18 @@ export type CertificateField = {
   fontStyle?: "normal" | "italic";
   textDecoration?: "none" | "underline" | "line-through";
   locked?: boolean;
+  // Image effects
+  objectFit?: "contain" | "cover" | "fill";
+  imageBorderRadius?: number;
+  imageBorderWidth?: number;
+  imageBorderColor?: string;
+  imageGrayscale?: boolean;
+  imageBlur?: number;
+  imageBrightness?: number;
+  imageContrast?: number;
 };
+
+export type BulkRow = Record<string, string>;
 
 export type PdfPageSize = {
   width: number;
