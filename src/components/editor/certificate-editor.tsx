@@ -1105,23 +1105,23 @@ export function CertificateEditor() {
 
   // Prevent hydration mismatch by not rendering until mounted
   if (!isLoaded) {
-    return <div className="h-dvh bg-zinc-100" />;
+    return <div className="h-dvh bg-background" />;
   }
 
   // Handle responsive limitation
   if (isTooSmall) {
     return (
-      <div className="flex h-dvh flex-col items-center justify-center bg-zinc-950 p-8 text-center text-white">
-        <div className="mb-8 flex size-24 items-center justify-center rounded-3xl bg-white/10 text-white shadow-2xl">
+      <div className="flex h-dvh flex-col items-center justify-center bg-background p-8 text-center text-foreground">
+        <div className="mb-8 flex size-24 items-center justify-center rounded-3xl bg-muted text-muted-foreground shadow-sm">
           <MonitorOff className="size-12" />
         </div>
         <h1 className="text-2xl font-bold tracking-tight">Screen Too Small</h1>
-        <p className="mt-4 max-w-md text-sm leading-relaxed text-zinc-400">
+        <p className="mt-4 max-w-md text-sm leading-relaxed text-muted-foreground">
           CertGen requires a minimum screen width of <strong>1200px</strong> for
           an optimal editing experience. Use a desktop device or make your
           browser window wider.
         </p>
-        <div className="mt-10 h-1 w-24 rounded-full bg-zinc-800" />
+        <div className="mt-10 h-1 w-24 rounded-full bg-border" />
       </div>
     );
   }
@@ -1368,10 +1368,16 @@ export function CertificateEditor() {
                         </p>
                       </div>
 
-                      <div className="relative z-20 flex flex-col items-center gap-2">
+                      <div className="relative z-20 flex flex-wrap items-center gap-2">
                         <label
                           htmlFor="pdf-upload-empty"
-                          className={cn(buttonVariants({ size: "lg" }), "")}
+                          className={cn(
+                            buttonVariants({
+                              variant: "outline",
+                              size: "default",
+                            }),
+                            "",
+                          )}
                         >
                           <FileUp className="size-4" />
                           Start with PDF / Image
@@ -1379,8 +1385,8 @@ export function CertificateEditor() {
 
                         <Button
                           type="button"
-                          variant="ghost"
-                          size="lg"
+                          variant="outline"
+                          size="default"
                           onClick={() => setIsBlankProjectDialogOpen(true)}
                         >
                           <FilePlus className="size-4" />
@@ -1390,7 +1396,10 @@ export function CertificateEditor() {
                         <label
                           htmlFor="project-import-empty"
                           className={cn(
-                            buttonVariants({ variant: "ghost", size: "lg" }),
+                            buttonVariants({
+                              variant: "outline",
+                              size: "default",
+                            }),
                             "",
                           )}
                         >
@@ -1769,8 +1778,8 @@ function SidebarEditor({
             <div className="space-y-2">
               {fields.length === 0 ? (
                 <div className="flex flex-col items-center justify-center rounded-md border border-dashed py-12 text-center">
-                  <div className="mb-2 rounded-full bg-zinc-50 p-3">
-                    <Plus className="size-6 text-zinc-400" />
+                  <div className="mb-2 rounded-full bg-muted p-3">
+                    <Plus className="size-6 text-muted-foreground" />
                   </div>
                   <p className="text-sm font-medium">No fields yet</p>
                   <p className="max-w-[200px] text-xs text-muted-foreground">
@@ -1895,7 +1904,7 @@ function SidebarEditor({
                     </div>
 
                     {expandedFieldId === field.id && (
-                      <div className="border-t bg-white dark:bg-muted p-4">
+                      <div className="border-t bg-card p-4">
                         <FieldSettings
                           field={field}
                           onChange={(patch) => onUpdateField(field.id, patch)}
@@ -2296,8 +2305,8 @@ function PreviewField({
       className={cn(
         "absolute touch-none select-none border border-transparent bg-transparent px-1 text-left cursor-move",
         field.type === "image" && "overflow-hidden",
-        selected && "border-dashed border-sky-600 bg-sky-100/20",
-        dragging && "border-solid border-sky-700 bg-sky-100/40",
+        selected && "border-dashed border-primary bg-primary/10",
+        dragging && "border-solid border-primary bg-primary/20",
       )}
       style={{
         left,
@@ -2336,7 +2345,7 @@ function PreviewField({
       {editing && field.type === "text" ? (
         <input
           autoFocus
-          className="h-full w-full bg-white/80 px-1 outline-none"
+          className="h-full w-full bg-background/80 px-1 outline-none"
           value={field.value}
           style={{
             color: field.color,
@@ -2448,13 +2457,13 @@ function PreviewField({
       )}
       {selected ? (
         <>
-          <div className="absolute -top-7 left-0 z-50 flex h-6 w-max whitespace-nowrap items-center gap-2 rounded-full bg-zinc-900 px-2.5 py-1 text-[10px] font-bold font-sans text-white shadow-xl ring-1 ring-white/10 transition-all duration-300">
-            <span className="text-[9px] font-black text-zinc-500 uppercase tracking-tighter">
+          <div className="absolute -top-7 left-0 z-50 flex h-6 w-max whitespace-nowrap items-center gap-2 rounded-full bg-popover px-2.5 py-1 text-[10px] font-bold font-sans text-popover-foreground shadow-sm ring-1 ring-border transition-all duration-300">
+            <span className="text-[9px] font-black text-muted-foreground uppercase tracking-tighter">
               W
             </span>
             <span className="tabular-nums">{Math.round(field.width)}</span>
-            <div className="mx-0.5 h-2 w-px bg-white/20" />
-            <span className="text-[9px] font-black text-zinc-500 uppercase tracking-tighter">
+            <div className="mx-0.5 h-2 w-px bg-border" />
+            <span className="text-[9px] font-black text-muted-foreground uppercase tracking-tighter">
               H
             </span>
             <span className="tabular-nums">{Math.round(field.height)}</span>
@@ -2470,7 +2479,7 @@ function PreviewField({
       {/* Visual Guidelines */}
       {dragging && activeGuides.x !== undefined && (
         <div
-          className="pointer-events-none absolute border-l border-sky-500/50 shadow-[0_0_8px_rgba(14,165,233,0.3)] z-[100]"
+          className="pointer-events-none absolute z-[100] border-l border-primary/50"
           style={{
             left: (activeGuides.x / pageSize.width) * previewSize.width - left,
             top: -top,
@@ -2481,7 +2490,7 @@ function PreviewField({
       )}
       {dragging && activeGuides.y !== undefined && (
         <div
-          className="pointer-events-none absolute border-t border-sky-500/50 shadow-[0_0_8px_rgba(14,165,233,0.3)] z-[100]"
+          className="pointer-events-none absolute z-[100] border-t border-primary/50"
           style={{
             left: -left,
             top:
@@ -2776,7 +2785,7 @@ function BulkPanel({
             isDragOver
               ? "border-primary bg-primary/5"
               : isUploaded
-                ? "border-green-500/30 bg-green-500/5"
+                ? "border-primary/30 bg-primary/5"
                 : "border-border bg-muted/30",
           )}
           onDragOver={handleDragOver}
@@ -2784,12 +2793,12 @@ function BulkPanel({
           onDrop={handleDrop}
         >
           {isUploaded && !isDragOver ? (
-            <CheckCircle2 className="size-8 text-green-600" />
+            <CheckCircle2 className="size-8 text-primary" />
           ) : (
             <FileUp
               className={cn(
                 "size-8 transition-colors",
-                isDragOver ? "text-zinc-950" : "text-zinc-400",
+                isDragOver ? "text-foreground" : "text-muted-foreground",
               )}
             />
           )}
@@ -3010,7 +3019,7 @@ function FieldSettings({
                     <div
                       className={cn(
                         "h-full w-full",
-                        field.shapeType === "line" && "bg-zinc-200 opacity-50",
+                        field.shapeType === "line" && "bg-muted opacity-50",
                       )}
                       style={{
                         backgroundColor:
