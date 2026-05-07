@@ -247,7 +247,7 @@ const defaultField: Omit<CertificateField, "id" | "label"> = {
   borderRadius: 0,
 };
 
-type CanvasPreset = "a4" | "a5";
+type CanvasPreset = "a4" | "a5" | "f4";
 type CanvasOrientation = "portrait" | "landscape";
 
 const canvasPresets: Record<
@@ -256,6 +256,7 @@ const canvasPresets: Record<
 > = {
   a4: { label: "A4", width: 595.28, height: 841.89 },
   a5: { label: "A5", width: 419.53, height: 595.28 },
+  f4: { label: "F4 / Folio", width: 595.28, height: 935.43 },
 };
 
 function getCanvasSize(
@@ -1549,7 +1550,7 @@ export function CertificateEditor() {
                 <Label className="text-xs font-semibold text-muted-foreground">
                   Canvas Size
                 </Label>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   {(Object.keys(canvasPresets) as CanvasPreset[]).map(
                     (preset) => (
                       <button
