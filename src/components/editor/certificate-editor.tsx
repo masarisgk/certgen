@@ -2,7 +2,7 @@
 
 import { PDFDocument } from "pdf-lib";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import JSZip from "jszip";
 import {
   Check,
@@ -17,6 +17,7 @@ import {
   FilePlus,
   FileUp,
   FolderOpen,
+  GripVertical,
   ImageIcon,
   Minus,
   MonitorOff,
@@ -32,7 +33,6 @@ import {
   AlignCenter,
   AlignRight,
   FileText,
-  Type,
   Undo,
   Redo,
   Shapes,
@@ -43,12 +43,10 @@ import {
   Square,
   Circle,
   RotateCw,
-  Layers,
 } from "lucide-react";
 import Papa from "papaparse";
 
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -62,7 +60,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -80,7 +77,6 @@ import {
   MenubarItem,
   MenubarMenu,
   MenubarSeparator,
-  MenubarShortcut,
   MenubarSub,
   MenubarSubContent,
   MenubarSubTrigger,
@@ -311,6 +307,10 @@ function createImageField(index: number): CertificateField {
   };
 }
 
+function getFieldsForRendering(fields: CertificateField[]) {
+  return fields.slice().reverse();
+}
+
 function fileToDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -377,7 +377,7 @@ const STORE_NAME = "templates";
 async function initDB() {
   return new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, 2);
-    request.onupgradeneeded = (event) => {
+    request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME);
@@ -473,11 +473,6 @@ export function CertificateEditor() {
   const projectInputRef = useRef<HTMLInputElement>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
   const { theme, setTheme } = useTheme();
-
-  const selectedField = useMemo(
-    () => fields.find((field) => field.id === selectedFieldId) ?? fields[0],
-    [fields, selectedFieldId],
-  );
 
   // Load state on mount
   useEffect(() => {
@@ -589,7 +584,7 @@ export function CertificateEditor() {
     };
   }, [templateBytes, viewportWidth, isLoaded, isTooSmall]);
 
-  function saveHistory(newFields: CertificateField[]) {
+  function saveHistory() {
     setPast((prev) => {
       const next = [fields, ...prev];
       return next.slice(0, 50); // Limit to 50 steps
@@ -597,23 +592,23 @@ export function CertificateEditor() {
     setFuture([]);
   }
 
-  function undo() {
+  const undo = useCallback(() => {
     if (past.length === 0) return;
     const previous = past[0];
     const newPast = past.slice(1);
     setFuture((prev) => [fields, ...prev]);
     setPast(newPast);
     setFields(previous);
-  }
+  }, [fields, past]);
 
-  function redo() {
+  const redo = useCallback(() => {
     if (future.length === 0) return;
     const next = future[0];
     const newFuture = future.slice(1);
     setPast((prev) => [fields, ...prev]);
     setFuture(newFuture);
     setFields(next);
-  }
+  }, [fields, future]);
 
   // Keyboard Shortcuts
   useEffect(() => {
@@ -638,31 +633,31 @@ export function CertificateEditor() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [past, future, fields]);
+  }, [undo, redo]);
 
   function addField() {
-    saveHistory(fields);
+    saveHistory();
     const next = createField(fields.length + 1);
     setFields((current) => [next, ...current]);
     setSelectedFieldId(next.id);
   }
 
   function addImageField() {
-    saveHistory(fields);
+    saveHistory();
     const next = createImageField(fields.length + 1);
     setFields((current) => [next, ...current]);
     setSelectedFieldId(next.id);
   }
 
   function addShapeField(shapeType: "rectangle" | "circle" | "line") {
-    saveHistory(fields);
+    saveHistory();
     const next = createShapeField(fields.length + 1, shapeType);
     setFields((current) => [next, ...current]);
     setSelectedFieldId(next.id);
   }
 
   function removeField(id: string) {
-    saveHistory(fields);
+    saveHistory();
     setFields((current) => {
       const next = current.filter((field) => field.id !== id);
       return next;
@@ -671,7 +666,7 @@ export function CertificateEditor() {
   }
 
   function duplicateField(id: string) {
-    saveHistory(fields);
+    saveHistory();
     const field = fields.find((f) => f.id === id);
     if (field) {
       const next = {
@@ -684,6 +679,27 @@ export function CertificateEditor() {
       setFields((current) => [next, ...current]);
       setSelectedFieldId(next.id);
     }
+  }
+
+  function reorderField(draggedId: string, targetId: string) {
+    if (draggedId === targetId) {
+      return;
+    }
+
+    const draggedIndex = fields.findIndex((field) => field.id === draggedId);
+    const targetIndex = fields.findIndex((field) => field.id === targetId);
+
+    if (draggedIndex === -1 || targetIndex === -1) {
+      return;
+    }
+
+    saveHistory();
+    setFields((current) => {
+      const next = current.slice();
+      const [draggedField] = next.splice(draggedIndex, 1);
+      next.splice(targetIndex, 0, draggedField);
+      return next;
+    });
   }
 
   function updateField(id: string, patch: Partial<CertificateField>) {
@@ -874,7 +890,10 @@ export function CertificateEditor() {
     }
 
     setIsGenerating(true);
-    const bytes = await generateCertificatePdf(templateBytes.slice(0), fields);
+    const bytes = await generateCertificatePdf(
+      templateBytes.slice(0),
+      getFieldsForRendering(fields),
+    );
     const safeName = fileName.replace(/\.pdf$/i, "") || "certificate";
     downloadBytes(bytes, `${safeName}-generated.pdf`);
     setIsGenerating(false);
@@ -888,7 +907,7 @@ export function CertificateEditor() {
       // 1. Generate the final PDF with fields
       const pdfBytes = await generateCertificatePdf(
         templateBytes.slice(0),
-        fields,
+        getFieldsForRendering(fields),
       );
 
       // 2. Load the generated PDF with pdfjs
@@ -948,6 +967,8 @@ export function CertificateEditor() {
     return row ? applyBulkRow(row) : fields;
   }
 
+  const previewFields = getFieldsForRendering(getBulkPreviewFields());
+
   function buildBulkFilename(row: BulkRow, rowIndex: number) {
     const name = filenameTemplate.replace(/\{row\}/g, String(rowIndex + 1));
     const filled = Object.entries(row).reduce(
@@ -983,7 +1004,7 @@ export function CertificateEditor() {
         const fieldsForRow = applyBulkRow(row);
         const pdfBytes = await generateCertificatePdf(
           templateBytes.slice(0),
-          fieldsForRow,
+          getFieldsForRendering(fieldsForRow),
         );
         const filename = buildBulkFilename(row, index);
 
@@ -1104,7 +1125,6 @@ export function CertificateEditor() {
   }
 
   const canPreviewFields = Boolean(pageSize && previewSize);
-  const previewFields = getBulkPreviewFields();
   useGoogleFontLoader(fields.map((field) => field.fontFamily));
 
   // Prevent hydration mismatch by not rendering until mounted
@@ -1452,17 +1472,17 @@ export function CertificateEditor() {
                             editing={field.id === editingFieldId}
                             onSelect={() => setSelectedFieldId(field.id)}
                             onEditStart={() => {
-                              saveHistory(fields);
+                              saveHistory();
                               setSelectedFieldId(field.id);
                               setEditingFieldId(field.id);
                             }}
                             onEditEnd={() => setEditingFieldId(null)}
                             onDragStart={() => {
-                              saveHistory(fields);
+                              saveHistory();
                               setDraggingFieldId(field.id);
                             }}
                             onDragEnd={() => setDraggingFieldId(null)}
-                            onResizeStart={() => saveHistory(fields)}
+                            onResizeStart={() => saveHistory()}
                             onMove={(x, y) => updateField(field.id, { x, y })}
                             onValueChange={(value) =>
                               updateField(field.id, { value })
@@ -1485,7 +1505,6 @@ export function CertificateEditor() {
           {templateBytes ? (
             <SidebarEditor
               fields={fields}
-              selectedField={selectedField}
               selectedFieldId={selectedFieldId}
               bulkRows={bulkRows}
               bulkPreviewIndex={bulkPreviewIndex}
@@ -1495,6 +1514,7 @@ export function CertificateEditor() {
               onAddShapeField={addShapeField}
               onRemoveField={removeField}
               onDuplicateField={duplicateField}
+              onReorderField={reorderField}
               onSelectField={setSelectedFieldId}
               onUpdateField={updateField}
               onBulkRowsChange={(rows) => {
@@ -1625,7 +1645,6 @@ export function CertificateEditor() {
 
 function SidebarEditor({
   fields,
-  selectedField,
   selectedFieldId,
   bulkRows,
   bulkPreviewIndex,
@@ -1635,6 +1654,7 @@ function SidebarEditor({
   onAddShapeField,
   onRemoveField,
   onDuplicateField,
+  onReorderField,
   onSelectField,
   onUpdateField,
   onBulkRowsChange,
@@ -1645,7 +1665,6 @@ function SidebarEditor({
   fileName,
 }: {
   fields: CertificateField[];
-  selectedField: CertificateField | undefined;
   selectedFieldId: string;
   bulkRows: BulkRow[];
   bulkPreviewIndex: number;
@@ -1655,6 +1674,7 @@ function SidebarEditor({
   onAddShapeField: (shapeType: "rectangle" | "circle" | "line") => void;
   onRemoveField: (id: string) => void;
   onDuplicateField: (id: string) => void;
+  onReorderField: (draggedId: string, targetId: string) => void;
   onSelectField: (id: string) => void;
   onUpdateField: (id: string, patch: Partial<CertificateField>) => void;
   onBulkRowsChange: (rows: BulkRow[]) => void;
@@ -1669,6 +1689,8 @@ function SidebarEditor({
   const [fieldToDelete, setFieldToDelete] = useState<CertificateField | null>(
     null,
   );
+  const [draggingLayerId, setDraggingLayerId] = useState<string | null>(null);
+  const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null);
 
   // Sync expanded state with selection
   useEffect(() => {
@@ -1799,9 +1821,70 @@ function SidebarEditor({
                       field.id === selectedFieldId
                         ? "border-primary/50 bg-input/50"
                         : "bg-input/30 border-border hover:bg-muted/50",
+                      draggingLayerId === field.id && "opacity-50",
+                      dragOverLayerId === field.id &&
+                        draggingLayerId !== field.id &&
+                        "border-primary bg-primary/10",
                     )}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "move";
+                      setDragOverLayerId(field.id);
+                    }}
+                    onDragLeave={(event) => {
+                      if (
+                        !event.currentTarget.contains(
+                          event.relatedTarget as Node | null,
+                        )
+                      ) {
+                        setDragOverLayerId(null);
+                      }
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      const draggedId =
+                        event.dataTransfer.getData("text/plain") ||
+                        draggingLayerId;
+
+                      if (draggedId) {
+                        onReorderField(draggedId, field.id);
+                      }
+
+                      setDraggingLayerId(null);
+                      setDragOverLayerId(null);
+                    }}
                   >
                     <div className="flex items-start justify-between gap-1 p-3">
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <button
+                              type="button"
+                              draggable
+                              className="mt-0.5 flex size-7 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:cursor-grabbing"
+                              aria-label={`Drag ${field.label} layer`}
+                              onDragStart={(event) => {
+                                event.dataTransfer.effectAllowed = "move";
+                                event.dataTransfer.setData(
+                                  "text/plain",
+                                  field.id,
+                                );
+                                setDraggingLayerId(field.id);
+                                setDragOverLayerId(field.id);
+                              }}
+                              onDragEnd={() => {
+                                setDraggingLayerId(null);
+                                setDragOverLayerId(null);
+                              }}
+                            >
+                              <GripVertical className="size-4" />
+                            </button>
+                          }
+                        />
+                        <TooltipContent side="bottom">
+                          Drag to reorder layer
+                        </TooltipContent>
+                      </Tooltip>
                       <button
                         type="button"
                         className="min-w-0 flex-1 text-left"
@@ -2153,11 +2236,6 @@ function PreviewField({
       let finalY = nextY;
       let guideX: number | undefined;
       let guideY: number | undefined;
-
-      const myXCenter = nextX + field.width / 2;
-      const myXRight = nextX + field.width;
-      const myYCenter = nextY + yOffset / 2;
-      const myYTop = nextY + yOffset;
 
       // Snapping candidates
       const xTargets = [
@@ -2955,7 +3033,6 @@ function FieldSettings({
   onChange: (patch: Partial<CertificateField>) => void;
 }) {
   useGoogleFontLoader([field.fontFamily]);
-  const isImageField = field.type === "image";
 
   return (
     <section className="space-y-5">
