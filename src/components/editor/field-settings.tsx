@@ -32,7 +32,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { GoogleFontSelect } from "./google-font-select";
-import { NumberInput } from "./number-input";
+import { BareNumberInput, NumberInput } from "./number-input";
 import { ImageUploadInput } from "./image-upload-input";
 import type {
   CertificateField,
@@ -50,17 +50,19 @@ export function FieldSettings({
 
   return (
     <section className="space-y-5">
-      <div className="grid gap-2">
-        <Label htmlFor="field-label" className="text-xs text-muted-foreground">
-          Label
-        </Label>
-        <Input
-          id="field-label"
-          value={field.label}
-          className="h-8 text-xs"
-          onChange={(event) => onChange({ label: event.target.value })}
-        />
-      </div>
+      {!field.isBackground && (
+        <div className="grid gap-2">
+          <Label htmlFor="field-label" className="text-xs text-muted-foreground">
+            Label
+          </Label>
+          <Input
+            id="field-label"
+            value={field.label}
+            className="h-8 text-xs"
+            onChange={(event) => onChange({ label: event.target.value })}
+          />
+        </div>
+      )}
 
       {field.type === "image" ? (
         <div className="space-y-5">
@@ -247,40 +249,37 @@ export function FieldSettings({
             <h3 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">
               Appearance
             </h3>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
+            <div className="grid gap-4">
+              <div className="grid min-w-0 gap-2">
                 <Label className="text-xs text-muted-foreground">Opacity</Label>
-                <div className="flex items-center gap-2">
+                <div className="flex min-w-0 items-center gap-2">
                   <input
                     type="range"
                     min="0"
                     max="1"
                     step="0.1"
                     value={field.opacity ?? 1}
-                    className="h-4 flex-1 cursor-pointer accent-primary"
+                    className="h-4 min-w-0 flex-1 cursor-pointer accent-primary"
                     onChange={(e) =>
                       onChange({ opacity: Number(e.target.value) })
                     }
                   />
-                  <span className="w-8 text-[10px] font-mono">
+                  <span className="w-6 shrink-0 text-right text-[10px] font-mono">
                     {(field.opacity ?? 1).toFixed(1)}
                   </span>
                 </div>
               </div>
 
-              <div className="grid gap-2">
+              <div className="grid min-w-0 gap-2">
                 <Label className="text-xs text-muted-foreground">Rotation</Label>
                 <div className="group relative flex items-center gap-0 overflow-hidden rounded-md border transition-colors focus-within:border-primary">
                   <div className="flex h-8 w-7 shrink-0 items-center justify-center border-r bg-muted text-[10px] font-bold text-muted-foreground select-none group-focus-within:text-foreground transition-colors">
                     <RotateCw className="size-3" />
                   </div>
-                  <input
-                    type="number"
+                  <BareNumberInput
                     value={field.rotate ?? 0}
                     className="h-8 w-full bg-background px-2 text-xs font-medium text-foreground outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none transition-colors"
-                    onChange={(e) =>
-                      onChange({ rotate: Number(e.target.value) })
-                    }
+                    onChange={(rotate) => onChange({ rotate })}
                   />
                   <div className="flex h-8 w-6 shrink-0 items-center justify-center text-[10px] text-muted-foreground">
                     °
@@ -574,13 +573,10 @@ export function FieldSettings({
                     <div className="flex h-8 w-9 shrink-0 items-center justify-center border-r bg-muted text-[10px] font-bold text-muted-foreground select-none group-focus-within:text-foreground transition-colors">
                       Px
                     </div>
-                    <input
-                      type="number"
+                    <BareNumberInput
                       value={Math.round(field.fontSize)}
                       className="h-8 w-full bg-background px-2 text-xs font-medium text-foreground outline-none transition-colors [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                      onChange={(e) =>
-                        onChange({ fontSize: Number(e.target.value) })
-                      }
+                      onChange={(fontSize) => onChange({ fontSize })}
                     />
                     <DropdownMenu>
                       <DropdownMenuTrigger className="flex h-8 w-7 shrink-0 items-center justify-center border-l bg-muted/30 hover:bg-muted transition-colors">
@@ -777,6 +773,51 @@ export function FieldSettings({
                   ))}
                 </div>
               </div>
+
+              <div className="grid gap-2">
+                <Label className="text-xs text-muted-foreground">
+                  Text Transform
+                </Label>
+                <div className="grid grid-cols-4 gap-1 rounded-md bg-muted/50 p-1">
+                  {[
+                    { value: "none", label: "Ab", title: "None" },
+                    { value: "uppercase", label: "AA", title: "Uppercase" },
+                    { value: "lowercase", label: "aa", title: "Lowercase" },
+                    { value: "capitalize", label: "Aa", title: "Capitalize" },
+                  ].map((item) => (
+                    <Tooltip key={item.value}>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            className={cn(
+                              "flex h-7 items-center justify-center rounded px-1 transition-all",
+                              (field.textTransform ?? "none") === item.value
+                                ? "bg-background text-foreground shadow-sm font-bold"
+                                : "text-muted-foreground hover:text-foreground",
+                            )}
+                            onClick={() =>
+                              onChange({
+                                textTransform:
+                                  item.value as CertificateField["textTransform"],
+                              })
+                            }
+                          >
+                            <span className="text-[11px] font-medium">
+                              {item.label}
+                            </span>
+                          </button>
+                        }
+                      >
+                        {item.title}
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom" className="text-[10px]">
+                        {item.title}
+                      </TooltipContent>
+                    </Tooltip>
+                  ))}
+                </div>
+              </div>
             </div>
 
             <div className="space-y-3">
@@ -817,28 +858,28 @@ export function FieldSettings({
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
+            <div className="grid gap-4">
+              <div className="grid min-w-0 gap-2">
                 <Label className="text-xs text-muted-foreground">Opacity</Label>
-                <div className="flex items-center gap-2">
+                <div className="flex min-w-0 items-center gap-2">
                   <input
                     type="range"
                     min="0"
                     max="1"
                     step="0.1"
                     value={field.opacity ?? 1}
-                    className="h-4 flex-1 cursor-pointer accent-primary"
+                    className="h-4 min-w-0 flex-1 cursor-pointer accent-primary"
                     onChange={(e) =>
                       onChange({ opacity: Number(e.target.value) })
                     }
                   />
-                  <span className="w-8 text-[10px] font-mono">
+                  <span className="w-6 shrink-0 text-right text-[10px] font-mono">
                     {(field.opacity ?? 1).toFixed(1)}
                   </span>
                 </div>
               </div>
 
-              <div className="grid gap-2">
+              <div className="grid min-w-0 gap-2">
                 <Label className="text-xs text-muted-foreground">
                   Rotation
                 </Label>
@@ -846,13 +887,10 @@ export function FieldSettings({
                   <div className="flex h-8 w-7 shrink-0 items-center justify-center border-r bg-muted text-[10px] font-bold text-muted-foreground select-none group-focus-within:text-foreground transition-colors">
                     <RotateCw className="size-3" />
                   </div>
-                  <input
-                    type="number"
+                  <BareNumberInput
                     value={field.rotate ?? 0}
                     className="h-8 w-full bg-background px-2 text-xs font-medium text-foreground outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none transition-colors"
-                    onChange={(e) =>
-                      onChange({ rotate: Number(e.target.value) })
-                    }
+                    onChange={(rotate) => onChange({ rotate })}
                   />
                   <div className="flex h-8 w-6 shrink-0 items-center justify-center text-[10px] text-muted-foreground">
                     °
@@ -881,51 +919,6 @@ export function FieldSettings({
                   value={field.lineHeight ?? 1.25}
                   onChange={(val) => onChange({ lineHeight: val })}
                 />
-              </div>
-            </div>
-
-            <div className="grid gap-2">
-              <Label className="text-xs text-muted-foreground">
-                Text Transform
-              </Label>
-              <div className="grid grid-cols-4 gap-1 rounded-md bg-muted/50 p-1">
-                {[
-                  { value: "none", label: "Ab", title: "None" },
-                  { value: "uppercase", label: "AA", title: "Uppercase" },
-                  { value: "lowercase", label: "aa", title: "Lowercase" },
-                  { value: "capitalize", label: "Aa", title: "Capitalize" },
-                ].map((item) => (
-                  <Tooltip key={item.value}>
-                    <TooltipTrigger
-                      render={
-                        <button
-                          type="button"
-                          className={cn(
-                            "flex h-7 items-center justify-center rounded px-1 transition-all",
-                            (field.textTransform ?? "none") === item.value
-                              ? "bg-background text-foreground shadow-sm font-bold"
-                              : "text-muted-foreground hover:text-foreground",
-                          )}
-                          onClick={() =>
-                            onChange({
-                              textTransform:
-                                item.value as CertificateField["textTransform"],
-                            })
-                          }
-                        >
-                          <span className="text-[11px] font-medium">
-                            {item.label}
-                          </span>
-                        </button>
-                      }
-                    >
-                      {item.title}
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" className="text-[10px]">
-                      {item.title}
-                    </TooltipContent>
-                  </Tooltip>
-                ))}
               </div>
             </div>
 

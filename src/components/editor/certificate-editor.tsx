@@ -1,6 +1,6 @@
 "use client";
 
-import { PDFDocument } from "pdf-lib";
+import { PDFDocument, rgb } from "pdf-lib";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import JSZip from "jszip";
@@ -27,6 +27,7 @@ import {
   MonitorOff,
   MoreHorizontal,
   Plus,
+  Printer,
   RotateCcw,
   Save,
   Search,
@@ -104,6 +105,7 @@ import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
 import { GoogleFontSelect } from "./google-font-select";
 import { LayersSidebar } from "./layers-sidebar";
+import { BareNumberInput } from "./number-input";
 import { PreviewField } from "./preview-field";
 import { PropertiesSidebar } from "./properties-sidebar";
 import { generateCertificatePdf } from "@/lib/pdf/generate-certificate";
@@ -158,6 +160,11 @@ const defaultField: Omit<CertificateField, "id" | "label"> = {
 type CanvasPreset = "a4" | "a5" | "f4" | "custom";
 type CanvasOrientation = "portrait" | "landscape";
 type CanvasUnit = "px" | "mm";
+type BackgroundImage = {
+  dataUrl: string;
+  mimeType: "image/png" | "image/jpeg";
+  fileName: string;
+};
 
 const canvasPresets: Record<CanvasPreset, { label: string; width: number; height: number }> = {
   a4: { label: "A4", width: 595.28, height: 841.89 },
@@ -173,6 +180,21 @@ function mmToPdfPoints(value: number) {
 function canvasUnitToPdfPoints(value: number, unit: CanvasUnit) {
   const safeValue = Math.max(1, value);
   return unit === "mm" ? mmToPdfPoints(safeValue) : safeValue;
+}
+
+function hexToPdfRgb(hex: string) {
+  const normalized = hex.replace("#", "").trim();
+  const value = Number.parseInt(normalized, 16);
+
+  if (Number.isNaN(value) || normalized.length !== 6) {
+    return rgb(1, 1, 1);
+  }
+
+  return rgb(
+    ((value >> 16) & 255) / 255,
+    ((value >> 8) & 255) / 255,
+    (value & 255) / 255,
+  );
 }
 
 function getCanvasSize(
@@ -238,8 +260,37 @@ function createImageField(index: number): CertificateField {
   };
 }
 
+function createBackgroundImageField(
+  image: BackgroundImage,
+  size: PdfPageSize,
+): CertificateField {
+  return {
+    ...defaultField,
+    type: "image",
+    id: crypto.randomUUID(),
+    label: "Background Image",
+    value: image.fileName,
+    imageDataUrl: image.dataUrl,
+    imageMimeType: image.mimeType,
+    x: 0,
+    y: 0,
+    width: size.width,
+    height: size.height,
+    opacity: 1,
+    rotate: 0,
+    objectFit: "fill",
+    isBackground: true,
+  };
+}
+
+function normalizeLayerOrder(fields: CertificateField[]) {
+  const regularFields = fields.filter((field) => !field.isBackground);
+  const backgroundFields = fields.filter((field) => field.isBackground);
+  return [...regularFields, ...backgroundFields];
+}
+
 function getFieldsForRendering(fields: CertificateField[]) {
-  return fields.slice().reverse();
+  return normalizeLayerOrder(fields).slice().reverse();
 }
 
 function fileToDataUrl(file: File) {
@@ -299,6 +350,34 @@ function base64ToArrayBuffer(base64: string) {
     bytes[i] = binaryString.charCodeAt(i);
   }
   return bytes.buffer;
+}
+
+function detectImageMimeType(bytes: ArrayBuffer | Uint8Array) {
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  const isPng =
+    data[0] === 0x89 &&
+    data[1] === 0x50 &&
+    data[2] === 0x4e &&
+    data[3] === 0x47 &&
+    data[4] === 0x0d &&
+    data[5] === 0x0a &&
+    data[6] === 0x1a &&
+    data[7] === 0x0a;
+  const isJpeg = data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff;
+
+  if (isPng) {
+    return "image/png";
+  }
+
+  if (isJpeg) {
+    return "image/jpeg";
+  }
+
+  return null;
+}
+
+function normalizeFilenameTemplate(value: string) {
+  return value.replace(/\.(pdf|jpg|jpeg|png)$/i, "");
 }
 
 // IndexedDB Helpers for PDF Persistence
@@ -394,6 +473,7 @@ export function CertificateEditor() {
     useState(false);
   const [isNewProjectDialogOpen, setIsNewProjectDialogOpen] = useState(false);
   const [isAboutDialogOpen, setIsAboutDialogOpen] = useState(false);
+  const [isBackgroundDialogOpen, setIsBackgroundDialogOpen] = useState(false);
   const [blankCanvasPreset, setBlankCanvasPreset] =
     useState<CanvasPreset>("a4");
   const [blankCanvasOrientation, setBlankCanvasOrientation] =
@@ -401,6 +481,10 @@ export function CertificateEditor() {
   const [customCanvasWidth, setCustomCanvasWidth] = useState(595);
   const [customCanvasHeight, setCustomCanvasHeight] = useState(842);
   const [customCanvasUnit, setCustomCanvasUnit] = useState<CanvasUnit>("px");
+  const [backgroundColor, setBackgroundColor] = useState("#ffffff");
+  const [backgroundImage, setBackgroundImage] = useState<BackgroundImage | null>(
+    null,
+  );
   const [isTooSmall, setIsTooSmall] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(0);
   const [layersSidebarWidth, setLayersSidebarWidth] = useState(280);
@@ -421,8 +505,8 @@ export function CertificateEditor() {
             filenameTemplate: ft,
             bulkRows: br,
           } = JSON.parse(savedState);
-          setFields(f);
-          setFilenameTemplate(ft);
+          setFields(normalizeLayerOrder(f));
+          setFilenameTemplate(normalizeFilenameTemplate(ft));
           setBulkRows(br);
           if (f[0]) setSelectedFieldId(f[0].id);
         }
@@ -598,21 +682,21 @@ export function CertificateEditor() {
   function addField() {
     saveHistory();
     const next = createField(fields.length + 1);
-    setFields((current) => [next, ...current]);
+    setFields((current) => normalizeLayerOrder([next, ...current]));
     setSelectedFieldId(next.id);
   }
 
   function addImageField() {
     saveHistory();
     const next = createImageField(fields.length + 1);
-    setFields((current) => [next, ...current]);
+    setFields((current) => normalizeLayerOrder([next, ...current]));
     setSelectedFieldId(next.id);
   }
 
   function addShapeField(shapeType: "rectangle" | "circle" | "line") {
     saveHistory();
     const next = createShapeField(fields.length + 1, shapeType);
-    setFields((current) => [next, ...current]);
+    setFields((current) => normalizeLayerOrder([next, ...current]));
     setSelectedFieldId(next.id);
   }
 
@@ -620,7 +704,7 @@ export function CertificateEditor() {
     saveHistory();
     setFields((current) => {
       const next = current.filter((field) => field.id !== id);
-      return next;
+      return normalizeLayerOrder(next);
     });
     setSelectedFieldId("");
   }
@@ -628,7 +712,7 @@ export function CertificateEditor() {
   function duplicateField(id: string) {
     saveHistory();
     const field = fields.find((f) => f.id === id);
-    if (field) {
+    if (field && !field.isBackground) {
       const next = {
         ...field,
         id: crypto.randomUUID(),
@@ -636,13 +720,20 @@ export function CertificateEditor() {
         x: field.x + 20,
         y: field.y - 20,
       };
-      setFields((current) => [next, ...current]);
+      setFields((current) => normalizeLayerOrder([next, ...current]));
       setSelectedFieldId(next.id);
     }
   }
 
   function reorderField(draggedId: string, targetId: string) {
     if (draggedId === targetId) {
+      return;
+    }
+
+    const draggedField = fields.find((field) => field.id === draggedId);
+    const targetField = fields.find((field) => field.id === targetId);
+
+    if (draggedField?.isBackground || targetField?.isBackground) {
       return;
     }
 
@@ -658,7 +749,7 @@ export function CertificateEditor() {
       const next = current.slice();
       const [draggedField] = next.splice(draggedIndex, 1);
       next.splice(targetIndex, 0, draggedField);
-      return next;
+      return normalizeLayerOrder(next);
     });
   }
 
@@ -669,6 +760,10 @@ export function CertificateEditor() {
     const index = fields.findIndex((field) => field.id === id);
 
     if (index === -1) {
+      return;
+    }
+
+    if (fields[index].isBackground) {
       return;
     }
 
@@ -692,16 +787,37 @@ export function CertificateEditor() {
       const next = current.slice();
       const [field] = next.splice(index, 1);
       next.splice(targetIndex, 0, field);
-      return next;
+      return normalizeLayerOrder(next);
     });
   }
 
   function updateField(id: string, patch: Partial<CertificateField>) {
     setFields((current) =>
-      current.map((field) =>
-        field.id === id ? { ...field, ...patch } : field,
+      normalizeLayerOrder(
+        current.map((field) =>
+          field.id === id ? { ...field, ...patch } : field,
+        ),
       ),
     );
+  }
+
+  function openBackgroundDialog() {
+    const existingBackground = fields.find(
+      (field) =>
+        field.isBackground && field.imageDataUrl && field.imageMimeType,
+    );
+
+    if (existingBackground?.imageDataUrl && existingBackground.imageMimeType) {
+      setBackgroundImage({
+        dataUrl: existingBackground.imageDataUrl,
+        mimeType: existingBackground.imageMimeType,
+        fileName: existingBackground.value || existingBackground.label,
+      });
+    } else {
+      setBackgroundImage(null);
+    }
+
+    setIsBackgroundDialogOpen(true);
   }
 
   async function handleFile(file: File | null) {
@@ -796,8 +912,10 @@ export function CertificateEditor() {
   async function importProjectFile(file: File) {
     try {
       const data = JSON.parse(await file.text());
-      if (data.fields) setFields(data.fields);
-      if (data.filenameTemplate) setFilenameTemplate(data.filenameTemplate);
+      if (data.fields) setFields(normalizeLayerOrder(data.fields));
+      if (data.filenameTemplate) {
+        setFilenameTemplate(normalizeFilenameTemplate(data.filenameTemplate));
+      }
       if (data.bulkRows) setBulkRows(data.bulkRows);
       setFileName(data.fileName || "");
 
@@ -831,34 +949,135 @@ export function CertificateEditor() {
     event.target.value = ""; // Reset input
   }
 
-  async function createBlankProject() {
-    const size = getCanvasSize(blankCanvasPreset, blankCanvasOrientation, {
-      width: customCanvasWidth,
-      height: customCanvasHeight,
-      unit: customCanvasUnit,
-    });
-    const pdfDoc = await PDFDocument.create();
-    pdfDoc.addPage([size.width, size.height]);
-    const bytes = await pdfDoc.save();
-    const blankBuffer = uint8ArrayToArrayBuffer(bytes);
-    const nextFileName = `blank-${blankCanvasPreset}-${blankCanvasOrientation}.pdf`;
+  async function handleBackgroundImage(file: File | null) {
+    if (!file) {
+      return;
+    }
 
-    localStorage.removeItem("certgen-config");
-    setPast([]);
-    setFuture([]);
-    setFields([]);
-    setSelectedFieldId("");
-    setBulkRows([]);
-    setBulkPreviewIndex(0);
-    setFilenameTemplate("certificate-{row}");
-    setFileName(nextFileName);
-    setTemplateBytes(bytes);
-    setPageSize(null);
-    setPreviewSize(null);
-    resetCanvasView();
-    await saveTemplateToDB(blankBuffer, nextFileName);
-    setIsBlankProjectDialogOpen(false);
-    toast.success("Blank project created.");
+    const bytes = await file.arrayBuffer();
+    const mimeType = detectImageMimeType(bytes);
+
+    if (!mimeType) {
+      toast.error("Use a PNG or JPG image for the background.");
+      return;
+    }
+
+    const dataUrl = await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.readAsDataURL(new Blob([bytes], { type: mimeType }));
+    });
+
+    setBackgroundImage({
+      dataUrl,
+      mimeType,
+      fileName: file.name,
+    });
+  }
+
+  async function createBackgroundPdf(size: PdfPageSize, color = backgroundColor) {
+    const pdfDoc = await PDFDocument.create();
+    const page = pdfDoc.addPage([size.width, size.height]);
+
+    page.drawRectangle({
+      x: 0,
+      y: 0,
+      width: size.width,
+      height: size.height,
+      color: hexToPdfRgb(color),
+    });
+
+    return pdfDoc.save();
+  }
+
+  function upsertBackgroundImageLayer(size: PdfPageSize) {
+    if (!backgroundImage) {
+      setFields((current) =>
+        normalizeLayerOrder(current.filter((field) => !field.isBackground)),
+      );
+      return "";
+    }
+
+    const existingBackground = fields.find((field) => field.isBackground);
+    const nextBackground = existingBackground
+      ? {
+          ...existingBackground,
+          value: backgroundImage.fileName,
+          imageDataUrl: backgroundImage.dataUrl,
+          imageMimeType: backgroundImage.mimeType,
+          width: existingBackground.width || size.width,
+          height: existingBackground.height || size.height,
+          visible: true,
+          isBackground: true,
+        }
+      : createBackgroundImageField(backgroundImage, size);
+
+    setFields((current) =>
+      normalizeLayerOrder([
+        nextBackground,
+        ...current.filter((field) => field.id !== nextBackground.id),
+      ]),
+    );
+
+    return nextBackground.id;
+  }
+
+  async function applyBackgroundToCurrentProject() {
+    if (!pageSize) {
+      return;
+    }
+
+    try {
+      saveHistory();
+      const bytes = await createBackgroundPdf(pageSize);
+      const buffer = uint8ArrayToArrayBuffer(bytes);
+      const backgroundFieldId = upsertBackgroundImageLayer(pageSize);
+      setTemplateBytes(bytes);
+      setPageSize(null);
+      setPreviewSize(null);
+      if (backgroundFieldId) {
+        setSelectedFieldId(backgroundFieldId);
+      }
+      await saveTemplateToDB(buffer, fileName || "background.pdf");
+      setIsBackgroundDialogOpen(false);
+      toast.success("Background updated.");
+    } catch (error) {
+      console.error("Background update error:", error);
+      toast.error("Failed to update background. Use a valid PNG or JPG image.");
+    }
+  }
+
+  async function createBlankProject() {
+    try {
+      const size = getCanvasSize(blankCanvasPreset, blankCanvasOrientation, {
+        width: customCanvasWidth,
+        height: customCanvasHeight,
+        unit: customCanvasUnit,
+      });
+      const bytes = await createBackgroundPdf(size, "#ffffff");
+      const blankBuffer = uint8ArrayToArrayBuffer(bytes);
+      const nextFileName = `blank-${blankCanvasPreset}-${blankCanvasOrientation}.pdf`;
+
+      localStorage.removeItem("certgen-config");
+      setPast([]);
+      setFuture([]);
+      setFields([]);
+      setSelectedFieldId("");
+      setBulkRows([]);
+      setBulkPreviewIndex(0);
+      setFilenameTemplate("certificate-{row}");
+      setFileName(nextFileName);
+      setTemplateBytes(bytes);
+      setPageSize(null);
+      setPreviewSize(null);
+      resetCanvasView();
+      await saveTemplateToDB(blankBuffer, nextFileName);
+      setIsBlankProjectDialogOpen(false);
+      toast.success("Blank project created.");
+    } catch (error) {
+      console.error("Blank project background error:", error);
+      toast.error("Failed to create project. Use a valid PNG or JPG image.");
+    }
   }
 
   function returnToStartPage() {
@@ -895,6 +1114,49 @@ export function CertificateEditor() {
     const safeName = fileName.replace(/\.pdf$/i, "") || "certificate";
     downloadBytes(bytes, `${safeName}-generated.pdf`);
     setIsGenerating(null);
+  }
+
+  async function printPdf() {
+    if (!templateBytes) {
+      return;
+    }
+
+    setIsGenerating("pdf");
+
+    try {
+      const bytes = await generateCertificatePdf(
+        templateBytes.slice(0),
+        getFieldsForRendering(fields),
+      );
+      const pdfBuffer = bytes.buffer.slice(
+        bytes.byteOffset,
+        bytes.byteOffset + bytes.byteLength,
+      ) as ArrayBuffer;
+      const blob = new Blob([pdfBuffer], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const printWindow = window.open(url, "_blank");
+
+      if (!printWindow) {
+        URL.revokeObjectURL(url);
+        toast.error("Allow pop-ups to print the certificate.");
+        return;
+      }
+
+      printWindow.addEventListener(
+        "load",
+        () => {
+          printWindow.focus();
+          printWindow.print();
+          window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+        },
+        { once: true },
+      );
+    } catch (error) {
+      console.error("Print error:", error);
+      toast.error("Failed to prepare the certificate for printing.");
+    } finally {
+      setIsGenerating(null);
+    }
   }
 
   async function generateJpg() {
@@ -968,7 +1230,20 @@ export function CertificateEditor() {
   const previewFields = getFieldsForRendering(getBulkPreviewFields());
 
   function buildBulkFilename(row: BulkRow, rowIndex: number) {
-    const name = filenameTemplate.replace(/\{row\}/g, String(rowIndex + 1));
+    const missingFilenameHeader = Array.from(
+      normalizeFilenameTemplate(filenameTemplate).matchAll(/\{([^{}]+)\}/g),
+    )
+      .map((match) => match[1].trim())
+      .find((header) => header && header !== "row" && !(header in row));
+
+    if (missingFilenameHeader) {
+      throw new Error(`Missing filename header: ${missingFilenameHeader}`);
+    }
+
+    const name = normalizeFilenameTemplate(filenameTemplate).replace(
+      /\{row\}/g,
+      String(rowIndex + 1),
+    );
     const filled = Object.entries(row).reduce(
       (current, [key, value]) => current.replaceAll(`{${key}}`, value),
       name,
@@ -1262,6 +1537,13 @@ export function CertificateEditor() {
                           <FolderOpen className="size-3 text-muted-foreground" />
                           Open Project
                         </MenubarItem>
+                        <MenubarItem
+                          onClick={() => pdfInputRef.current?.click()}
+                          disabled={!templateBytes}
+                        >
+                          <FileUp className="size-3 text-muted-foreground" />
+                          Change PDF / Image
+                        </MenubarItem>
                         <MenubarSeparator />
                         <MenubarItem
                           onClick={exportProject}
@@ -1269,6 +1551,13 @@ export function CertificateEditor() {
                         >
                           <Save className="size-3 text-muted-foreground" />
                           Save Project
+                        </MenubarItem>
+                        <MenubarItem
+                          onClick={printPdf}
+                          disabled={!templateBytes || !!isGenerating}
+                        >
+                          <Printer className="size-3 text-muted-foreground" />
+                          Print
                         </MenubarItem>
                         <MenubarSub>
                           <MenubarSubTrigger>
@@ -1310,11 +1599,22 @@ export function CertificateEditor() {
                         </MenubarItem>
                         <MenubarSeparator />
                         <MenubarItem
-                          onClick={() => pdfInputRef.current?.click()}
+                          onClick={() => duplicateField(selectedFieldId)}
+                          disabled={
+                            !selectedFieldId ||
+                            fields.find((field) => field.id === selectedFieldId)
+                              ?.isBackground
+                          }
+                        >
+                          <Copy className="size-3 text-muted-foreground" />
+                          Duplicate
+                        </MenubarItem>
+                        <MenubarItem
+                          onClick={openBackgroundDialog}
                           disabled={!templateBytes}
                         >
-                          <FileUp className="size-3 text-muted-foreground" />
-                          Change PDF / Image
+                          <ImageIcon className="size-3 text-muted-foreground" />
+                          Change Background
                         </MenubarItem>
                       </MenubarContent>
                     </MenubarMenu>
@@ -1332,7 +1632,9 @@ export function CertificateEditor() {
                           ) : (
                             <Moon className="size-3 text-muted-foreground" />
                           )}
-                          Toggle Theme
+                          {theme === "dark"
+                            ? "Switch to Light Mode"
+                            : "Switch to Dark Mode"}
                         </MenubarItem>
                         <MenubarSeparator />
                         <MenubarItem onClick={resetCanvasView}>
@@ -1552,7 +1854,9 @@ export function CertificateEditor() {
                   setBulkPreviewIndex(0);
                 }}
                 onBulkPreviewIndexChange={setBulkPreviewIndex}
-                onFilenameTemplateChange={setFilenameTemplate}
+                onFilenameTemplateChange={(value) =>
+                  setFilenameTemplate(normalizeFilenameTemplate(value))
+                }
                 onGenerateBulk={generateBulkZip}
                 isGenerating={isGenerating}
               />
@@ -1564,7 +1868,7 @@ export function CertificateEditor() {
           open={isNewProjectDialogOpen}
           onOpenChange={setIsNewProjectDialogOpen}
         >
-          <DialogContent>
+          <DialogContent className="w-[calc(100vw-2rem)] max-w-xl overflow-hidden">
             <DialogHeader>
               <DialogTitle>Start a New Project?</DialogTitle>
               <DialogDescription>
@@ -1637,26 +1941,22 @@ export function CertificateEditor() {
                       <Label className="text-xs font-semibold text-muted-foreground">
                         Width
                       </Label>
-                      <Input
-                        type="number"
+                      <BareNumberInput
                         min={1}
                         value={customCanvasWidth}
-                        onChange={(event) =>
-                          setCustomCanvasWidth(Number(event.target.value))
-                        }
+                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] selection:bg-primary selection:text-primary-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50"
+                        onChange={setCustomCanvasWidth}
                       />
                     </div>
                     <div className="space-y-2">
                       <Label className="text-xs font-semibold text-muted-foreground">
                         Height
                       </Label>
-                      <Input
-                        type="number"
+                      <BareNumberInput
                         min={1}
                         value={customCanvasHeight}
-                        onChange={(event) =>
-                          setCustomCanvasHeight(Number(event.target.value))
-                        }
+                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow] selection:bg-primary selection:text-primary-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50"
+                        onChange={setCustomCanvasHeight}
                       />
                     </div>
                   <div className="space-y-2">
@@ -1710,8 +2010,9 @@ export function CertificateEditor() {
                   </div>
                 </div>
               )}
+
             </div>
-            <DialogFooter className="gap-2">
+            <DialogFooter className="mx-0 mb-0 flex flex-wrap gap-2 rounded-md border bg-muted/40 p-3 sm:justify-end">
               <Button
                 variant="ghost"
                 onClick={() => setIsBlankProjectDialogOpen(false)}
@@ -1720,6 +2021,107 @@ export function CertificateEditor() {
               </Button>
               <Button onClick={() => void createBlankProject()}>
                 Create Project
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog
+          open={isBackgroundDialogOpen}
+          onOpenChange={setIsBackgroundDialogOpen}
+        >
+          <DialogContent className="!w-[calc(100vw-2rem)] !max-w-xl overflow-hidden">
+            <DialogHeader className="min-w-0 pr-8">
+              <DialogTitle>Change Background</DialogTitle>
+              <DialogDescription className="break-words">
+                Set the base color and add a PNG/JPG background image as a
+                resizable layer. Existing layers stay in place.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="min-w-0 space-y-3 py-2">
+              <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_44px] gap-2">
+                <Input
+                  value={backgroundColor}
+                  className="h-9 text-xs font-mono uppercase"
+                  onChange={(event) => setBackgroundColor(event.target.value)}
+                />
+                <div className="relative h-9 overflow-hidden rounded-md border bg-background">
+                  <Input
+                    type="color"
+                    value={backgroundColor}
+                    className="absolute inset-0 h-full w-full cursor-pointer border-none bg-transparent p-0 opacity-0"
+                    onChange={(event) =>
+                      setBackgroundColor(event.target.value)
+                    }
+                  />
+                  <div className="h-full w-full" style={{ backgroundColor }} />
+                </div>
+              </div>
+
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <label
+                  htmlFor="active-background-upload"
+                  className={cn(
+                    buttonVariants({ variant: "outline", size: "sm" }),
+                    "h-8 max-w-full cursor-pointer text-xs",
+                  )}
+                >
+                  <ImageIcon className="size-3.5" />
+                  <span className="truncate">Upload Background</span>
+                </label>
+                <input
+                  id="active-background-upload"
+                  type="file"
+                  accept="image/png,image/jpeg"
+                  className="hidden"
+                  onChange={(event) =>
+                    void handleBackgroundImage(event.target.files?.[0] ?? null)
+                  }
+                />
+                {backgroundImage ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 text-xs text-destructive hover:bg-destructive/10"
+                    onClick={() => setBackgroundImage(null)}
+                  >
+                    Remove
+                  </Button>
+                ) : null}
+              </div>
+
+              {backgroundImage ? (
+                <div className="flex min-w-0 items-center gap-3 rounded-md border bg-muted/20 p-2">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={backgroundImage.dataUrl}
+                    alt=""
+                    className="h-14 w-20 rounded border object-cover"
+                  />
+                  <div className="min-w-0 flex-1 overflow-hidden">
+                    <p className="max-w-full truncate text-xs font-medium">
+                      {backgroundImage.fileName}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">
+                      The image will fill the full canvas.
+                    </p>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+            <DialogFooter className="mx-0 mb-0 flex flex-wrap gap-2 rounded-md border bg-muted/40 p-3 sm:justify-end">
+              <Button
+                variant="ghost"
+                onClick={() => setIsBackgroundDialogOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                disabled={!pageSize}
+                onClick={() => void applyBackgroundToCurrentProject()}
+              >
+                Apply Background
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -1763,4 +2165,3 @@ export function CertificateEditor() {
     </main>
   );
 }
-

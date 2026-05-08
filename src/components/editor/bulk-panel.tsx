@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { BareNumberInput } from "./number-input";
 import type { CertificateField, BulkRow } from "@/types/certificate-field";
 
 export function BulkPanel({
@@ -42,6 +43,22 @@ export function BulkPanel({
   const mappedCount = textFields.filter((field) =>
     headers.includes(field.label),
   ).length;
+  const missingFields = rows.length
+    ? textFields.filter((field) => !headers.includes(field.label))
+    : [];
+  const filenameHeaders = Array.from(
+    new Set(
+      Array.from(filenameTemplate.matchAll(/\{([^{}]+)\}/g))
+        .map((match) => match[1].trim())
+        .filter((header) => header && header !== "row"),
+    ),
+  );
+  const missingFilenameHeaders = rows.length
+    ? filenameHeaders.filter((header) => !headers.includes(header))
+    : [];
+  const hasMissingHeaders = missingFields.length > 0;
+  const hasMissingFilenameHeaders = missingFilenameHeaders.length > 0;
+  const hasValidationErrors = hasMissingHeaders || hasMissingFilenameHeaders;
   const isUploaded = rows.length > 0;
 
   function handleCsv(file: File | null) {
@@ -161,6 +178,48 @@ export function BulkPanel({
         </p>
       </div>
 
+      {hasMissingHeaders ? (
+        <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3">
+          <p className="text-xs font-semibold text-destructive">
+            Missing CSV headers
+          </p>
+          <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+            Rename your CSV headers or field labels so they match.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-1">
+            {missingFields.map((field) => (
+              <span
+                key={field.id}
+                className="rounded border border-destructive/20 bg-background px-1.5 py-0.5 text-[10px] text-destructive"
+              >
+                {field.label}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {hasMissingFilenameHeaders ? (
+        <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3">
+          <p className="text-xs font-semibold text-destructive">
+            Missing filename headers
+          </p>
+          <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+            Filename placeholders must use {"{row}"} or detected CSV headers.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-1">
+            {missingFilenameHeaders.map((header) => (
+              <span
+                key={header}
+                className="rounded border border-destructive/20 bg-background px-1.5 py-0.5 text-[10px] text-destructive"
+              >
+                {`{${header}}`}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {headers.length ? (
         <div className="space-y-2">
           <Label className="text-xs text-muted-foreground">
@@ -199,20 +258,16 @@ export function BulkPanel({
               >
                 <ChevronLeft className="size-4 text-muted-foreground" />
               </Button>
-              <Input
+              <BareNumberInput
                 id="bulk-preview-row"
-                type="number"
                 min={1}
                 max={rows.length}
                 value={previewIndex + 1}
                 className="h-8 text-center text-xs"
-                onChange={(e) => {
-                  const val = parseInt(e.target.value, 10);
-                  if (!isNaN(val)) {
-                    onPreviewIndexChange(
-                      Math.min(Math.max(0, val - 1), rows.length - 1),
-                    );
-                  }
+                onChange={(value) => {
+                  onPreviewIndexChange(
+                    Math.min(Math.max(0, Math.round(value) - 1), rows.length - 1),
+                  );
                 }}
               />
               <Button
@@ -242,14 +297,15 @@ export function BulkPanel({
               onChange={(event) => onFilenameTemplateChange(event.target.value)}
             />
             <p className="text-[10px] text-muted-foreground italic">
-              Use {"{row}"} or headers like {"{Name}"}.
+              Use {"{row}"} or headers like {"{Name}"}. Extension is added
+              automatically.
             </p>
           </div>
 
           <div className="pt-4 space-y-2">
             <Button
               className="w-full text-xs font-bold uppercase tracking-wider"
-              disabled={!!isGenerating}
+              disabled={!!isGenerating || hasValidationErrors}
               onClick={() => onGenerate("pdf")}
             >
               {isGenerating === "pdf" ? (
@@ -262,7 +318,7 @@ export function BulkPanel({
             <Button
               variant="outline"
               className="w-full text-xs font-bold uppercase tracking-wider"
-              disabled={!!isGenerating}
+              disabled={!!isGenerating || hasValidationErrors}
               onClick={() => onGenerate("jpg")}
             >
               {isGenerating === "jpg" ? (

@@ -53,6 +53,7 @@ export type CertificateField = {
   imageBlur?: number;
   imageBrightness?: number;
   imageContrast?: number;
+  isBackground?: boolean;
 };
 
 export type BulkRow = Record<string, string>;

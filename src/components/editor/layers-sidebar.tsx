@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import {
   Circle,
+  Copy,
   Eye,
   EyeOff,
   FileText,
@@ -157,7 +158,7 @@ export function LayersSidebar({
             fields.map((field) => (
               <div
                 key={field.id}
-                draggable={editingId !== field.id}
+                draggable={editingId !== field.id && !field.isBackground}
                 className={cn(
                   "group flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-all cursor-default select-none",
                   field.id === selectedFieldId
@@ -166,11 +167,16 @@ export function LayersSidebar({
                   draggingLayerId === field.id && "opacity-30",
                   dragOverLayerId === field.id &&
                     "bg-primary/5 ring-1 ring-primary/10",
+                  field.isBackground && "text-muted-foreground/80",
                 )}
                 onClick={() => onSelectField(field.id)}
-                onDoubleClick={() => startEditing(field)}
+                onDoubleClick={() => {
+                  if (!field.isBackground) {
+                    startEditing(field);
+                  }
+                }}
                 onDragStart={(e) => {
-                  if (editingId === field.id) {
+                  if (editingId === field.id || field.isBackground) {
                     e.preventDefault();
                     return;
                   }
@@ -182,10 +188,16 @@ export function LayersSidebar({
                   setDragOverLayerId(null);
                 }}
                 onDragOver={(e) => {
+                  if (field.isBackground) {
+                    return;
+                  }
                   e.preventDefault();
                   setDragOverLayerId(field.id);
                 }}
                 onDrop={(e) => {
+                  if (field.isBackground) {
+                    return;
+                  }
                   e.preventDefault();
                   const draggedId = e.dataTransfer.getData("text/plain");
                   if (draggedId) onReorderField(draggedId, field.id);
@@ -222,7 +234,14 @@ export function LayersSidebar({
                     onClick={(e) => e.stopPropagation()}
                   />
                 ) : (
-                  <span className="flex-1 truncate">{field.label}</span>
+                  <span className="flex-1 truncate">
+                    {field.label}
+                    {field.isBackground ? (
+                      <span className="ml-1 text-[9px] font-medium uppercase text-muted-foreground/70">
+                        BG
+                      </span>
+                    ) : null}
+                  </span>
                 )}
 
                 <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -239,6 +258,17 @@ export function LayersSidebar({
                       <EyeOff className="size-3" />
                     )}
                   </button>
+                  {!field.isBackground ? (
+                    <button
+                      className="size-5 flex items-center justify-center rounded hover:bg-background transition-colors"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDuplicateField(field.id);
+                      }}
+                    >
+                      <Copy className="size-3" />
+                    </button>
+                  ) : null}
                   <button
                     className="size-5 flex items-center justify-center rounded hover:bg-background transition-colors text-destructive"
                     onClick={(e) => {

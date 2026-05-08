@@ -278,22 +278,55 @@ export function PreviewField({
       field.type === "image" ? 24 : Math.max(18, fontSize * 1.15);
     const maxWidth = currentPreviewSize.width - left;
     const maxHeight = currentPreviewSize.height - top;
+    const aspectRatio = startWidth / Math.max(1, startHeight);
 
     function handlePointerMove(moveEvent: PointerEvent) {
-      const nextPreviewWidth = Math.min(
+      let nextPreviewWidth = Math.min(
         Math.max(
           minWidth,
           startWidth + (moveEvent.clientX - startClientX) / canvasZoom,
         ),
         maxWidth,
       );
-      const nextPreviewHeight = Math.min(
+      let nextPreviewHeight = Math.min(
         Math.max(
           minHeight,
           startHeight + (moveEvent.clientY - startClientY) / canvasZoom,
         ),
         maxHeight,
       );
+
+      if (moveEvent.shiftKey) {
+        const widthDelta = Math.abs(nextPreviewWidth - startWidth);
+        const heightDelta = Math.abs(nextPreviewHeight - startHeight);
+
+        if (widthDelta >= heightDelta) {
+          nextPreviewHeight = nextPreviewWidth / aspectRatio;
+        } else {
+          nextPreviewWidth = nextPreviewHeight * aspectRatio;
+        }
+
+        if (nextPreviewWidth > maxWidth) {
+          nextPreviewWidth = maxWidth;
+          nextPreviewHeight = nextPreviewWidth / aspectRatio;
+        }
+
+        if (nextPreviewHeight > maxHeight) {
+          nextPreviewHeight = maxHeight;
+          nextPreviewWidth = nextPreviewHeight * aspectRatio;
+        }
+
+        if (nextPreviewWidth < minWidth) {
+          nextPreviewWidth = minWidth;
+          nextPreviewHeight = nextPreviewWidth / aspectRatio;
+        }
+
+        if (nextPreviewHeight < minHeight) {
+          nextPreviewHeight = minHeight;
+          nextPreviewWidth = nextPreviewHeight * aspectRatio;
+        }
+      }
+
       const nextWidth =
         (nextPreviewWidth / currentPreviewSize.width) * currentPageSize.width;
       const nextHeight =
@@ -318,8 +351,8 @@ export function PreviewField({
     <button
       type="button"
       className={cn(
-        "absolute touch-none select-none border border-transparent bg-transparent px-1 text-left cursor-move",
-        field.type === "image" && "overflow-hidden",
+        "absolute touch-none select-none border border-transparent bg-transparent text-left cursor-move",
+        field.type === "text" && "px-1",
         field.locked && "cursor-default",
         selected && "border-dashed border-primary bg-primary/10",
         dragging && "border-solid border-primary bg-primary/20",
@@ -346,8 +379,8 @@ export function PreviewField({
               .toString(16)
               .padStart(2, "0")}`
           : "none",
-        whiteSpace: "pre-wrap",
-        wordBreak: "break-word",
+        whiteSpace: "pre",
+        wordBreak: "normal",
       }}
       onPointerDown={handlePointerDown}
       onDoubleClick={(event) => {
@@ -539,7 +572,7 @@ export function PreviewField({
           </div>
           <span
             aria-hidden="true"
-            className="absolute bottom-0 right-0 size-3 cursor-se-resize border-b-2 border-r-2 border-primary bg-background"
+            className="absolute -bottom-1 -right-1 size-3 cursor-se-resize rounded-[2px] border border-background bg-primary shadow-sm"
             onPointerDown={handleResizePointerDown}
           />
         </>
