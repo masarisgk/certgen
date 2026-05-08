@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import { Check, ChevronDown, Clock, Search, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Popover,
@@ -31,22 +30,9 @@ export function GoogleFontSelect({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [recentFonts, setRecentFonts] = useState<string[]>([]);
-  const [favoriteFonts, setFavoriteFonts] = useState<string[]>([]);
-
-  // Load recent & favorites from localStorage on mount
-  useEffect(() => {
-    setRecentFonts(getRecentFonts());
-    setFavoriteFonts(getFavoriteFonts());
-  }, []);
-
-  // Refresh when popover opens
-  useEffect(() => {
-    if (open) {
-      setRecentFonts(getRecentFonts());
-      setFavoriteFonts(getFavoriteFonts());
-    }
-  }, [open]);
+  const [recentFonts, setRecentFonts] = useState<string[]>(getRecentFonts);
+  const [favoriteFonts, setFavoriteFonts] =
+    useState<string[]>(getFavoriteFonts);
 
   const filteredFonts = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -87,6 +73,15 @@ export function GoogleFontSelect({
     e.stopPropagation();
     const next = toggleFavoriteFont(font);
     setFavoriteFonts(next);
+  }
+
+  function handleOpenChange(nextOpen: boolean) {
+    setOpen(nextOpen);
+
+    if (nextOpen) {
+      setRecentFonts(getRecentFonts());
+      setFavoriteFonts(getFavoriteFonts());
+    }
   }
 
   function renderFontItem(font: string) {
@@ -145,7 +140,7 @@ export function GoogleFontSelect({
 
   return (
     <div className="relative">
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover open={open} onOpenChange={handleOpenChange}>
         <PopoverTrigger className="group relative flex w-full items-center gap-0 overflow-hidden rounded-md border text-left transition-colors hover:bg-muted/50 focus-visible:ring-1 focus-visible:ring-primary outline-none">
           <div className="flex h-10 flex-1 items-center px-3 py-2">
             <span

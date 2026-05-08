@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import type { CertificateFieldFont } from "@/types/certificate-field";
 
 export const previewFontWeight = {
   regular: 400,

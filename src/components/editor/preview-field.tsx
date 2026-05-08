@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { Circle, ImageIcon, Minus, Square } from "lucide-react";
+import { ImageIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getFontStack, previewFontWeight } from "@/lib/fonts";
 import type {
@@ -572,7 +572,7 @@ export function PreviewField({
           </div>
           <span
             aria-hidden="true"
-            className="absolute -bottom-1 -right-1 size-3 cursor-se-resize rounded-[2px] border border-background bg-primary shadow-sm"
+            className="absolute -bottom-1 -right-1 size-3 cursor-se-resize rounded-sm border border-background bg-primary shadow-sm"
             onPointerDown={handleResizePointerDown}
           />
         </>
@@ -581,7 +581,7 @@ export function PreviewField({
       {/* Visual Guidelines */}
       {dragging && activeGuides.x !== undefined && (
         <div
-          className="pointer-events-none absolute z-[100] border-l border-primary/50"
+          className="pointer-events-none absolute z-50 border-l border-primary/50"
           style={{
             left: (activeGuides.x / pageSize.width) * previewSize.width - left,
             top: -top,
@@ -592,7 +592,7 @@ export function PreviewField({
       )}
       {dragging && activeGuides.y !== undefined && (
         <div
-          className="pointer-events-none absolute z-[100] border-t border-primary/50"
+          className="pointer-events-none absolute z-50 border-t border-primary/50"
           style={{
             left: -left,
             top:

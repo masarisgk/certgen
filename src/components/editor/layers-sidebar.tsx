@@ -44,7 +44,6 @@ export function LayersSidebar({
   onRemoveField,
   onDuplicateField,
   onReorderField,
-  onMoveLayer,
   onSelectField,
   onUpdateField,
 }: {
@@ -56,7 +55,6 @@ export function LayersSidebar({
   onRemoveField: (id: string) => void;
   onDuplicateField: (id: string) => void;
   onReorderField: (draggedId: string, targetId: string) => void;
-  onMoveLayer: (id: string, direction: "front" | "back" | "up" | "down") => void;
   onSelectField: (id: string) => void;
   onUpdateField: (id: string, patch: Partial<CertificateField>) => void;
 }) {

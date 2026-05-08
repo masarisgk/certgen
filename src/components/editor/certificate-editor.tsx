@@ -1714,7 +1714,7 @@ export function CertificateEditor() {
                 {!templateBytes ? (
                   <div
                     className={cn(
-                      "flex h-[560px] w-[860px] max-w-full flex-col items-center justify-center gap-8 rounded-xl border-2 border-dashed transition-all duration-300",
+                      "flex h-140 w-215 max-w-full flex-col items-center justify-center gap-8 rounded-xl border-2 border-dashed transition-all duration-300",
                       isPdfDragOver
                         ? "border-primary bg-primary/5 ring-4 ring-primary/5"
                         : "border-muted-foreground/20 bg-muted/30 hover:bg-muted/50",
